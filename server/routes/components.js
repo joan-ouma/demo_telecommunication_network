@@ -1,6 +1,7 @@
 import express from 'express';
 import pool from '../database.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
+import { logAction } from '../utils/auditLogger.js';
 
 const router = express.Router();
 
@@ -26,7 +27,7 @@ router.get('/', authenticateToken, async (req, res) => {
             params.push(`%${search}%`, `%${search}%`);
         }
 
-        query += ' ORDER BY created_at DESC';
+        query += ' ORDER BY type ASC, name ASC';
 
         const [components] = await pool.query(query, params);
 
@@ -121,6 +122,16 @@ router.post('/', authenticateToken, requireRole('Admin', 'Technician'), async (r
             message: 'Component created successfully',
             data: { id: result.insertId, name, type, status }
         });
+
+        // Log component creation
+        await logAction({
+            userId: req.user.id,
+            action: 'CREATE_COMPONENT',
+            entityType: 'Component',
+            entityId: result.insertId,
+            details: { name, type, location },
+            req
+        });
     } catch (error) {
         console.error('Create component error:', error);
         res.status(500).json({
@@ -165,6 +176,16 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'Technician'), async 
             success: true,
             message: 'Component updated successfully'
         });
+
+        // Log component update
+        await logAction({
+            userId: req.user.id,
+            action: 'UPDATE_COMPONENT',
+            entityType: 'Component',
+            entityId: req.params.id,
+            details: { name, status }, // Logging minimal details, could expand
+            req
+        });
     } catch (error) {
         console.error('Update component error:', error);
         res.status(500).json({
@@ -192,6 +213,16 @@ router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) 
         res.json({
             success: true,
             message: 'Component deleted successfully'
+        });
+
+        // Log component deletion
+        await logAction({
+            userId: req.user.id,
+            action: 'DELETE_COMPONENT',
+            entityType: 'Component',
+            entityId: req.params.id,
+            details: 'Component deleted',
+            req
         });
     } catch (error) {
         console.error('Delete component error:', error);

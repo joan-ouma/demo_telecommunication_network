@@ -25,7 +25,10 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
         SUM(CASE WHEN status = 'Open' THEN 1 ELSE 0 END) as open_faults,
         SUM(CASE WHEN status = 'In Progress' THEN 1 ELSE 0 END) as in_progress,
         SUM(CASE WHEN status IN ('Resolved', 'Closed') THEN 1 ELSE 0 END) as resolved,
-        SUM(CASE WHEN priority = 'Critical' AND status NOT IN ('Resolved', 'Closed') THEN 1 ELSE 0 END) as critical_open
+        SUM(CASE WHEN priority = 'Critical' AND status NOT IN ('Resolved', 'Closed') THEN 1 ELSE 0 END) as critical_open,
+        SUM(CASE WHEN priority = 'High' AND status NOT IN ('Resolved', 'Closed') THEN 1 ELSE 0 END) as high_open,
+        SUM(CASE WHEN priority = 'Medium' AND status NOT IN ('Resolved', 'Closed') THEN 1 ELSE 0 END) as medium_open,
+        SUM(CASE WHEN priority = 'Low' AND status NOT IN ('Resolved', 'Closed') THEN 1 ELSE 0 END) as low_open
       FROM Faults
     `);
 

@@ -39,7 +39,7 @@ export async function initializeDatabase() {
         password_hash VARCHAR(255) NOT NULL,
         first_name VARCHAR(100) NOT NULL,
         last_name VARCHAR(100) NOT NULL,
-        role ENUM('Admin', 'Technician', 'Viewer') DEFAULT 'Technician',
+        role ENUM('Admin', 'Technician') DEFAULT 'Technician',
         status ENUM('Active', 'Inactive') DEFAULT 'Active',
         phone_number VARCHAR(15),
         email VARCHAR(100) UNIQUE,
@@ -135,6 +135,32 @@ export async function initializeDatabase() {
         active_components INT DEFAULT 0,
         components_in_maintenance INT DEFAULT 0,
         recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Fault Comments table (For technician-admin communication)
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS Fault_Comments (
+        comment_id INT AUTO_INCREMENT PRIMARY KEY,
+        fault_id INT NOT NULL,
+        user_id INT NOT NULL,
+        comment TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (fault_id) REFERENCES Faults(fault_id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES Users(user_id) ON DELETE CASCADE
+      )
+    `);
+
+    // Maintenance Comments table (For technician-admin communication during maintenance)
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS Maintenance_Comments (
+        comment_id INT AUTO_INCREMENT PRIMARY KEY,
+        log_id INT NOT NULL,
+        user_id INT NOT NULL,
+        comment TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (log_id) REFERENCES Maintenance_Logs(log_id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES Users(user_id) ON DELETE CASCADE
       )
     `);
 

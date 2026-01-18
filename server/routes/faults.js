@@ -1,23 +1,27 @@
 import express from 'express';
 import pool from '../database.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
+import { logAction } from '../utils/auditLogger.js';
 
 const router = express.Router();
 
 // Get all faults with filtering
 router.get('/', authenticateToken, async (req, res) => {
     try {
-        const { status, priority, category, component_id, technician_id } = req.query;
+        const { status, priority, category, component_id, technician_id, from_date, to_date } = req.query;
+        const currentUserId = req.user.id;
         let query = `
-      SELECT f.*, 
-             nc.name as component_name, nc.type as component_type,
-             CONCAT(t.first_name, ' ', t.last_name) as technician_name,
-             u.username as reported_by_name
+      SELECT f.*,
+            nc.name as component_name, nc.type as component_type,
+            CONCAT(t.first_name, ' ', t.last_name) as technician_name,
+            u.username as reported_by_name,
+            (SELECT COUNT(*) FROM Fault_Comments fc WHERE fc.fault_id = f.fault_id) as comment_count,
+    (SELECT user_id FROM Fault_Comments fc WHERE fc.fault_id = f.fault_id ORDER BY created_at DESC LIMIT 1) as last_comment_user_id
       FROM Faults f
       LEFT JOIN Network_Components nc ON f.component_id = nc.component_id
       LEFT JOIN Users t ON f.assigned_to = t.user_id
       LEFT JOIN Users u ON f.reported_by = u.user_id
-      WHERE 1=1
+      WHERE 1 = 1
     `;
         const params = [];
 
@@ -46,8 +50,18 @@ router.get('/', authenticateToken, async (req, res) => {
             params.push(technician_id);
         }
 
-        // Priority sort order needs to match Capitalized values
-        query += ' ORDER BY FIELD(f.priority, "Critical", "High", "Medium", "Low"), f.reported_at DESC';
+        if (from_date) {
+            query += ' AND DATE(f.reported_at) >= ?';
+            params.push(from_date);
+        }
+
+        if (to_date) {
+            query += ' AND DATE(f.reported_at) <= ?';
+            params.push(to_date);
+        }
+
+        // Default sort by reported date (newest first)
+        query += ' ORDER BY f.reported_at DESC';
 
         const [faults] = await pool.query(query, params);
 
@@ -69,10 +83,10 @@ router.get('/', authenticateToken, async (req, res) => {
 router.get('/:id', authenticateToken, async (req, res) => {
     try {
         const [faults] = await pool.query(`
-      SELECT f.*, 
-             nc.name as component_name, nc.type as component_type, nc.location as component_location,
-             CONCAT(t.first_name, ' ', t.last_name) as technician_name, t.email as technician_email, t.phone_number as technician_phone,
-             u.username as reported_by_name
+      SELECT f.*,
+    nc.name as component_name, nc.type as component_type, nc.location as component_location,
+    CONCAT(t.first_name, ' ', t.last_name) as technician_name, t.email as technician_email, t.phone_number as technician_phone,
+    u.username as reported_by_name
       FROM Faults f
       LEFT JOIN Network_Components nc ON f.component_id = nc.component_id
       LEFT JOIN Users t ON f.assigned_to = t.user_id
@@ -119,8 +133,8 @@ router.post('/', authenticateToken, async (req, res) => {
         // Let's assume req.user.id holds the user_id.
 
         const [result] = await pool.query(
-            `INSERT INTO Faults (component_id, reported_by, title, description, category, priority) 
-       VALUES (?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO Faults(component_id, reported_by, title, description, category, priority)
+VALUES(?, ?, ?, ?, ?, ?)`,
             [component_id, req.user.id, title, description, category, priority]
         );
 
@@ -131,6 +145,18 @@ router.post('/', authenticateToken, async (req, res) => {
                 ['Faulty', component_id]
             );
         }
+
+
+
+        // Log fault creation
+        await logAction({
+            userId: req.user.id,
+            action: 'CREATE_FAULT',
+            entityType: 'Fault',
+            entityId: result.insertId,
+            details: { title, priority, status: 'Open' },
+            req
+        });
 
         res.status(201).json({
             success: true,
@@ -168,10 +194,10 @@ router.put('/:id/assign', authenticateToken, requireRole('Admin', 'Technician'),
         }
 
         const [result] = await pool.query(
-            `UPDATE Faults SET 
-       assigned_to = ?, 
-       status = CASE WHEN status = 'Open' THEN 'In Progress' ELSE status END
-       WHERE fault_id = ?`,
+            `UPDATE Faults SET
+assigned_to = ?,
+    status = CASE WHEN status = 'Open' THEN 'In Progress' ELSE status END
+       WHERE fault_id = ? `,
             [technician_id, req.params.id] // Note: Removed assigned_at update as it's not in new schema definition, but could keep if we alter table. User def didn't include it explicitly in CREATE TABLE provided, but 'reported_at', 'resolved_at' were there.
             // Wait, user provided: "assigned_to INT" ... no assigned_at in the CREATE TABLE Faults provided. So I will skip it.
         );
@@ -231,13 +257,13 @@ router.put('/:id/status', authenticateToken, async (req, res) => {
         }
 
         await pool.query(
-            `UPDATE Faults SET 
-       status = ?,
-       resolution_notes = COALESCE(?, resolution_notes),
-       resolved_at = CASE WHEN ? = 'Resolved' AND resolved_at IS NULL THEN NOW() ELSE resolved_at END,
-       started_at = CASE WHEN ? = 'In Progress' AND started_at IS NULL THEN NOW() ELSE started_at END,
-       response_time_minutes = COALESCE(?, response_time_minutes)
-       WHERE fault_id = ?`,
+            `UPDATE Faults SET
+status = ?,
+    resolution_notes = COALESCE(?, resolution_notes),
+    resolved_at = CASE WHEN ? = 'Resolved' AND resolved_at IS NULL THEN NOW() ELSE resolved_at END,
+        started_at = CASE WHEN ? = 'In Progress' AND started_at IS NULL THEN NOW() ELSE started_at END,
+            response_time_minutes = COALESCE(?, response_time_minutes)
+       WHERE fault_id = ? `,
             [status, resolution_notes, status, status, responseTime, req.params.id]
         );
 
@@ -248,6 +274,16 @@ router.put('/:id/status', authenticateToken, async (req, res) => {
                 await pool.query("UPDATE Network_Components SET status = ? WHERE component_id = ? AND status = 'Faulty'", ['Active', fault.component_id]);
             }
         }
+
+        // Log status update
+        await logAction({
+            userId: req.user.id,
+            action: 'UPDATE_FAULT_STATUS',
+            entityType: 'Fault',
+            entityId: req.params.id,
+            details: { status, resolution_notes },
+            req
+        });
 
         res.json({
             success: true,
@@ -335,6 +371,81 @@ router.get('/stats/summary', authenticateToken, async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Failed to fetch fault statistics'
+        });
+    }
+});
+
+// Get comments for a fault
+router.get('/:id/comments', authenticateToken, async (req, res) => {
+    try {
+        const [comments] = await pool.query(`
+            SELECT fc.*, CONCAT(u.first_name, ' ', u.last_name) as user_name, u.role as user_role
+            FROM Fault_Comments fc
+            JOIN Users u ON fc.user_id = u.user_id
+            WHERE fc.fault_id = ?
+    ORDER BY fc.created_at ASC
+        `, [req.params.id]);
+
+        res.json({
+            success: true,
+            data: comments,
+            count: comments.length
+        });
+    } catch (error) {
+        console.error('Get comments error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch comments'
+        });
+    }
+});
+
+// Add comment to a fault
+router.post('/:id/comments', authenticateToken, async (req, res) => {
+    try {
+        const { comment } = req.body;
+        const faultId = req.params.id;
+        const userId = req.user.id;
+
+        if (!comment || comment.trim() === '') {
+            return res.status(400).json({
+                success: false,
+                message: 'Comment text is required'
+            });
+        }
+
+        // Verify fault exists
+        const [fault] = await pool.query('SELECT fault_id FROM Faults WHERE fault_id = ?', [faultId]);
+        if (fault.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Fault not found'
+            });
+        }
+
+        const [result] = await pool.query(
+            'INSERT INTO Fault_Comments (fault_id, user_id, comment) VALUES (?, ?, ?)',
+            [faultId, userId, comment.trim()]
+        );
+
+        // Get the inserted comment with user info
+        const [newComment] = await pool.query(`
+            SELECT fc.*, CONCAT(u.first_name, ' ', u.last_name) as user_name, u.role as user_role
+            FROM Fault_Comments fc
+            JOIN Users u ON fc.user_id = u.user_id
+            WHERE fc.comment_id = ?
+    `, [result.insertId]);
+
+        res.status(201).json({
+            success: true,
+            message: 'Comment added successfully',
+            data: newComment[0]
+        });
+    } catch (error) {
+        console.error('Add comment error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to add comment'
         });
     }
 });

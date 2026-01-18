@@ -1,6 +1,8 @@
 import express from 'express';
+import PDFDocument from 'pdfkit';
 import pool from '../database.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
+import { logAction } from '../utils/auditLogger.js';
 
 const router = express.Router();
 
@@ -95,7 +97,7 @@ router.post('/generate', authenticateToken, requireRole('Admin', 'Technician'), 
         // Fetch faults within the time range
         const [faults] = await pool.query(`
       SELECT f.*, nc.name as component_name, nc.type as component_type,
-             t.full_name as technician_name
+             CONCAT(t.first_name, ' ', t.last_name) as technician_name
       FROM Faults f
       LEFT JOIN Network_Components nc ON f.component_id = nc.component_id
       LEFT JOIN Users t ON f.assigned_to = t.user_id
@@ -119,12 +121,15 @@ router.post('/generate', authenticateToken, requireRole('Admin', 'Technician'), 
         AND component_id IS NOT NULL
     `, [start_time, end_time]);
 
-        // Determine impact level based on critical faults
-        const criticalCount = faults.filter(f => f.priority === 'Critical').length;
-        const highCount = faults.filter(f => f.priority === 'High').length;
-        let impactLevel = 'minor';
-        if (criticalCount > 0) impactLevel = 'critical';
-        else if (highCount > 2) impactLevel = 'major';
+        // Determine impact level (User provided default, or calculate if needed)
+        // const criticalCount = faults.filter(f => f.priority === 'Critical').length;
+        // const highCount = faults.filter(f => f.priority === 'High').length;
+        // let impactLevel = 'minor';
+        // if (criticalCount > 0) impactLevel = 'critical';
+        // else if (highCount > 2) impactLevel = 'major';
+
+        // Use user provided impact, or passed in body
+        let impactLevel = req.body.impact_level || 'minor';
 
         // Compile details
         const details = {
@@ -169,9 +174,9 @@ router.post('/generate', authenticateToken, requireRole('Admin', 'Technician'), 
             summary || `Incident report covering ${faults.length} faults from ${start_time} to ${end_time}`,
             start_time,
             end_time,
-            affectedComponents[0].count,
-            faults.length,
-            avgResolution[0].avg_time || 0,
+            req.body.affected_components !== undefined ? req.body.affected_components : affectedComponents[0].count,
+            req.body.total_faults !== undefined ? req.body.total_faults : faults.length,
+            req.body.avg_resolution_time !== undefined ? req.body.avg_resolution_time : (avgResolution[0].avg_time || 0),
             impactLevel,
             JSON.stringify(details),
             req.user.id
@@ -181,13 +186,24 @@ router.post('/generate', authenticateToken, requireRole('Admin', 'Technician'), 
             success: true,
             message: 'Incident report generated successfully',
             data: {
-                id: result.insertId,
-                title,
-                impact_level: impactLevel,
-                total_faults: faults.length,
-                affected_components: affectedComponents[0].count,
-                avg_resolution_time: Math.round(avgResolution[0].avg_time || 0)
-            }
+                data: {
+                    id: result.insertId,
+                    title,
+                    impact_level: impactLevel,
+                    total_faults: req.body.total_faults || faults.length,
+                    affected_components: req.body.affected_components || affectedComponents[0].count,
+                    avg_resolution_time: req.body.avg_resolution_time || Math.round(avgResolution[0].avg_time || 0)
+                }
+            });
+
+        // Log report generation
+        await logAction({
+            userId: req.user.id,
+            action: 'GENERATE_REPORT',
+            entityType: 'Report',
+            entityId: result.insertId,
+            details: { title, impact_level: impactLevel },
+            req
         });
     } catch (error) {
         console.error('Generate report error:', error);
@@ -277,6 +293,16 @@ router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) 
             success: true,
             message: 'Report deleted successfully'
         });
+
+        // Log report deletion
+        await logAction({
+            userId: req.user.id,
+            action: 'DELETE_REPORT',
+            entityType: 'Report',
+            entityId: req.params.id,
+            details: { title: 'Report deleted' },
+            req
+        });
     } catch (error) {
         console.error('Delete report error:', error);
         res.status(500).json({
@@ -286,4 +312,115 @@ router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) 
     }
 });
 
+// Export report as PDF
+router.get('/:id/pdf', authenticateToken, async (req, res) => {
+    try {
+        // Fetch the report
+        const [reports] = await pool.query(`
+            SELECT ir.*, CONCAT(u.first_name, ' ', u.last_name) as generated_by_name
+            FROM Incident_Reports ir
+            LEFT JOIN Users u ON ir.generated_by = u.user_id
+            WHERE ir.report_id = ?
+        `, [req.params.id]);
+
+        if (reports.length === 0) {
+            return res.status(404).json({ success: false, message: 'Report not found' });
+        }
+
+        const report = reports[0];
+        const details = report.details ? (typeof report.details === 'string' ? JSON.parse(report.details) : report.details) : {};
+
+        // Create PDF
+        const doc = new PDFDocument({ margin: 50, size: 'A4' });
+
+        // Set response headers
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename=incident_report_${report.report_id}.pdf`);
+
+        // Pipe the PDF to response
+        doc.pipe(res);
+
+        // Header with logo/title
+        doc.fontSize(24).fillColor('#606C38').text('MnettyWise', { align: 'center' });
+        doc.fontSize(10).fillColor('#666').text('Network Management System', { align: 'center' });
+        doc.moveDown(1);
+
+        // Report Title
+        doc.fontSize(18).fillColor('#283618').text('Incident Report', { align: 'center' });
+        doc.moveDown(0.5);
+        doc.fontSize(14).fillColor('#333').text(report.title, { align: 'center' });
+        doc.moveDown(1);
+
+        // Horizontal line
+        doc.strokeColor('#606C38').lineWidth(2).moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+        doc.moveDown(1);
+
+        // Report Details Box
+        doc.fontSize(12).fillColor('#283618').text('Report Details', { underline: true });
+        doc.moveDown(0.5);
+
+        doc.fontSize(10).fillColor('#333');
+        doc.text(`Report ID: #${report.report_id}`, { continued: true });
+        doc.text(`    Generated: ${new Date(report.generated_at).toLocaleString()}`, { align: 'right' });
+        doc.moveDown(0.3);
+        doc.text(`Generated By: ${report.generated_by_name || 'System'}`);
+        doc.moveDown(0.3);
+        doc.text(`Time Period: ${new Date(report.start_time).toLocaleString()} - ${new Date(report.end_time).toLocaleString()}`);
+        doc.moveDown(0.3);
+
+        const impactColors = { critical: '#DC3545', major: '#FFC107', minor: '#28A745' };
+        doc.text(`Impact Level: `, { continued: true });
+        doc.fillColor(impactColors[report.impact_level] || '#333').text(report.impact_level?.toUpperCase() || 'N/A');
+        doc.moveDown(1);
+
+        // Statistics
+        doc.fontSize(12).fillColor('#283618').text('Summary Statistics', { underline: true });
+        doc.moveDown(0.5);
+        doc.fontSize(10).fillColor('#333');
+        doc.text(`Total Faults: ${report.total_faults || 0}`);
+        doc.text(`Affected Components: ${report.affected_components_count || 0}`);
+        doc.text(`Average Resolution Time: ${report.avg_resolution_time ? report.avg_resolution_time + ' minutes' : 'N/A'}`);
+        doc.moveDown(1);
+
+        // Summary
+        if (report.summary) {
+            doc.fontSize(12).fillColor('#283618').text('Summary', { underline: true });
+            doc.moveDown(0.5);
+            doc.fontSize(10).fillColor('#333').text(report.summary, { align: 'justify' });
+            doc.moveDown(1);
+        }
+
+        // Fault Details (if available in JSON)
+        if (details.faults && details.faults.length > 0) {
+            doc.fontSize(12).fillColor('#283618').text('Fault Details', { underline: true });
+            doc.moveDown(0.5);
+
+            details.faults.forEach((fault, index) => {
+                doc.fontSize(10).fillColor('#606C38').text(`${index + 1}. ${fault.title || 'Untitled Fault'}`);
+                doc.fontSize(9).fillColor('#666');
+                doc.text(`   Component: ${fault.component_name || 'N/A'} | Priority: ${fault.priority || 'N/A'} | Status: ${fault.status || 'N/A'}`);
+                if (fault.description) {
+                    doc.text(`   Description: ${fault.description.substring(0, 100)}${fault.description.length > 100 ? '...' : ''}`);
+                }
+                doc.moveDown(0.3);
+            });
+            doc.moveDown(1);
+        }
+
+        // Footer
+        doc.fontSize(8).fillColor('#999');
+        const footerY = doc.page.height - 50;
+        doc.text(`Generated by MnettyWise Network Management System on ${new Date().toLocaleString()}`, 50, footerY, { align: 'center', width: 495 });
+        doc.text(`Confidential - For Internal Use Only`, 50, footerY + 12, { align: 'center', width: 495 });
+
+        // Finalize PDF
+        doc.end();
+
+    } catch (error) {
+        console.error('Export PDF error:', error);
+        res.status(500).json({ success: false, message: 'Failed to generate PDF' });
+    }
+});
+
 export default router;
+

@@ -1,6 +1,7 @@
 import express from 'express';
 import pool from '../database.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
+import { logAction } from '../utils/auditLogger.js';
 
 const router = express.Router();
 
@@ -23,7 +24,7 @@ router.get('/', authenticateToken, async (req, res) => {
     `;
         const params = [];
 
-        query += ' ORDER BY u.first_name, u.last_name';
+        query += ' ORDER BY u.created_at DESC';
 
         const [technicians] = await pool.query(query, params);
 
@@ -129,6 +130,16 @@ router.post('/', authenticateToken, requireRole('Admin'), async (req, res) => {
             message: 'Technician created successfully',
             data: { id: result.insertId, name: `${first_name} ${last_name}`, email }
         });
+
+        // Log technician creation
+        await logAction({
+            userId: req.user.id,
+            action: 'CREATE_TECHNICIAN',
+            entityType: 'User',
+            entityId: result.insertId,
+            details: { username, email, full_name: `${first_name} ${last_name}` },
+            req
+        });
     } catch (error) {
         console.error('Create technician error:', error);
         res.status(500).json({
@@ -161,8 +172,17 @@ router.put('/:id', authenticateToken, requireRole('Admin'), async (req, res) => 
         }
 
         res.json({
-            success: true,
             message: 'Technician updated successfully'
+        });
+
+        // Log technician update
+        await logAction({
+            userId: req.user.id,
+            action: 'UPDATE_TECHNICIAN',
+            entityType: 'User',
+            entityId: req.params.id,
+            details: { first_name, last_name, email },
+            req
         });
     } catch (error) {
         console.error('Update technician error:', error);
@@ -197,8 +217,17 @@ router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) 
                 [req.params.id]
             );
             res.json({
-                success: true,
                 message: 'Technician permanently deleted'
+            });
+
+            // Log technician deletion
+            await logAction({
+                userId: req.user.id,
+                action: 'DELETE_TECHNICIAN',
+                entityType: 'User',
+                entityId: req.params.id,
+                details: 'Technician deleted',
+                req
             });
         } catch (deleteError) {
             // If RESTRICT constraint prevents deletion

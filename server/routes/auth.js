@@ -1,14 +1,15 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import pool from '../database.js';
-import { generateToken } from '../middleware/auth.js';
+import { generateToken, authenticateToken } from '../middleware/auth.js';
+import { logAction } from '../utils/auditLogger.js';
 
 const router = express.Router();
 
 // Register new user
 router.post('/register', async (req, res) => {
     try {
-        const { username, email, password, first_name, last_name, phone_number, role = 'Viewer' } = req.body;
+        const { username, email, password, first_name, last_name, phone_number, role = 'Technician' } = req.body;
 
         if (!username || !email || !password || !first_name || !last_name) {
             return res.status(400).json({
@@ -109,6 +110,14 @@ router.post('/login', async (req, res) => {
             role: user.role
         });
 
+        // Log successful login
+        await logAction({
+            userId: user.user_id,
+            action: 'LOGIN',
+            details: 'User logged in successfully',
+            req
+        });
+
         res.json({
             success: true,
             message: 'Login successful',
@@ -170,6 +179,22 @@ router.get('/profile', async (req, res) => {
             success: false,
             message: 'Failed to fetch profile'
         });
+    }
+});
+
+// Logout user (for audit logging)
+router.post('/logout', authenticateToken, async (req, res) => {
+    try {
+        await logAction({
+            userId: req.user.id,
+            action: 'LOGOUT',
+            details: 'User logged out',
+            req
+        });
+        res.json({ success: true, message: 'Logged out successfully' });
+    } catch (error) {
+        console.error('Logout logging error:', error);
+        res.status(500).json({ success: false, message: 'Logout log failed' });
     }
 });
 
