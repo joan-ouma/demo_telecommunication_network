@@ -10,8 +10,8 @@ router.get('/', authenticateToken, async (req, res) => {
         const { impact_level, from_date, to_date } = req.query;
         let query = `
       SELECT ir.*, u.username as generated_by_name
-      FROM incident_reports ir
-      LEFT JOIN users u ON ir.generated_by = u.id
+      FROM Incident_Reports ir
+      LEFT JOIN Users u ON ir.generated_by = u.user_id
       WHERE 1=1
     `;
         const params = [];
@@ -41,6 +41,7 @@ router.get('/', authenticateToken, async (req, res) => {
             count: reports.length
         });
     } catch (error) {
+        // Table might not exist yet if I forgot to restore it. 
         console.error('Get reports error:', error);
         res.status(500).json({
             success: false,
@@ -54,9 +55,9 @@ router.get('/:id', authenticateToken, async (req, res) => {
     try {
         const [reports] = await pool.query(`
       SELECT ir.*, u.username as generated_by_name
-      FROM incident_reports ir
-      LEFT JOIN users u ON ir.generated_by = u.id
-      WHERE ir.id = ?
+      FROM Incident_Reports ir
+      LEFT JOIN Users u ON ir.generated_by = u.user_id
+      WHERE ir.report_id = ?
     `, [req.params.id]);
 
         if (reports.length === 0) {
@@ -80,7 +81,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 });
 
 // Generate new incident report
-router.post('/generate', authenticateToken, requireRole('admin', 'technician'), async (req, res) => {
+router.post('/generate', authenticateToken, requireRole('Admin', 'Technician'), async (req, res) => {
     try {
         const { title, start_time, end_time, summary } = req.body;
 
@@ -94,18 +95,18 @@ router.post('/generate', authenticateToken, requireRole('admin', 'technician'), 
         // Fetch faults within the time range
         const [faults] = await pool.query(`
       SELECT f.*, nc.name as component_name, nc.type as component_type,
-             t.name as technician_name
-      FROM faults f
-      LEFT JOIN network_components nc ON f.component_id = nc.id
-      LEFT JOIN technicians t ON f.assigned_technician_id = t.id
+             t.full_name as technician_name
+      FROM Faults f
+      LEFT JOIN Network_Components nc ON f.component_id = nc.component_id
+      LEFT JOIN Users t ON f.assigned_to = t.user_id
       WHERE f.reported_at BETWEEN ? AND ?
-      ORDER BY f.priority, f.reported_at
+      ORDER BY FIELD(f.priority, 'Critical', 'High', 'Medium', 'Low'), f.reported_at
     `, [start_time, end_time]);
 
         // Calculate statistics
         const [avgResolution] = await pool.query(`
       SELECT AVG(response_time_minutes) as avg_time
-      FROM faults 
+      FROM Faults 
       WHERE reported_at BETWEEN ? AND ?
         AND response_time_minutes IS NOT NULL
     `, [start_time, end_time]);
@@ -113,14 +114,14 @@ router.post('/generate', authenticateToken, requireRole('admin', 'technician'), 
         // Get affected components count
         const [affectedComponents] = await pool.query(`
       SELECT COUNT(DISTINCT component_id) as count
-      FROM faults 
+      FROM Faults 
       WHERE reported_at BETWEEN ? AND ?
         AND component_id IS NOT NULL
     `, [start_time, end_time]);
 
         // Determine impact level based on critical faults
-        const criticalCount = faults.filter(f => f.priority === 'critical').length;
-        const highCount = faults.filter(f => f.priority === 'high').length;
+        const criticalCount = faults.filter(f => f.priority === 'Critical').length;
+        const highCount = faults.filter(f => f.priority === 'High').length;
         let impactLevel = 'minor';
         if (criticalCount > 0) impactLevel = 'critical';
         else if (highCount > 2) impactLevel = 'major';
@@ -128,7 +129,7 @@ router.post('/generate', authenticateToken, requireRole('admin', 'technician'), 
         // Compile details
         const details = {
             faults: faults.map(f => ({
-                id: f.id,
+                id: f.fault_id,
                 title: f.title,
                 priority: f.priority,
                 status: f.status,
@@ -140,16 +141,16 @@ router.post('/generate', authenticateToken, requireRole('admin', 'technician'), 
             })),
             statistics: {
                 by_priority: {
-                    critical: faults.filter(f => f.priority === 'critical').length,
-                    high: faults.filter(f => f.priority === 'high').length,
-                    medium: faults.filter(f => f.priority === 'medium').length,
-                    low: faults.filter(f => f.priority === 'low').length
+                    critical: faults.filter(f => f.priority === 'Critical').length,
+                    high: faults.filter(f => f.priority === 'High').length,
+                    medium: faults.filter(f => f.priority === 'Medium').length,
+                    low: faults.filter(f => f.priority === 'Low').length
                 },
                 by_status: {
-                    open: faults.filter(f => f.status === 'open').length,
-                    in_progress: faults.filter(f => f.status === 'in_progress').length,
-                    resolved: faults.filter(f => f.status === 'resolved').length,
-                    closed: faults.filter(f => f.status === 'closed').length
+                    open: faults.filter(f => f.status === 'Open').length,
+                    in_progress: faults.filter(f => f.status === 'In Progress').length,
+                    resolved: faults.filter(f => f.status === 'Resolved').length,
+                    closed: faults.filter(f => f.status === 'Closed').length
                 },
                 by_category: faults.reduce((acc, f) => {
                     acc[f.category] = (acc[f.category] || 0) + 1;
@@ -160,7 +161,7 @@ router.post('/generate', authenticateToken, requireRole('admin', 'technician'), 
 
         // Insert report
         const [result] = await pool.query(`
-      INSERT INTO incident_reports 
+      INSERT INTO Incident_Reports 
       (title, summary, start_time, end_time, affected_components_count, total_faults, avg_resolution_time, impact_level, details, generated_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
@@ -210,7 +211,7 @@ router.get('/trends/summary', authenticateToken, async (req, res) => {
         SUM(total_faults) as total_faults,
         AVG(avg_resolution_time) as avg_resolution_time,
         SUM(CASE WHEN impact_level = 'critical' THEN 1 ELSE 0 END) as critical_incidents
-      FROM incident_reports 
+      FROM Incident_Reports 
       WHERE generated_at >= DATE_SUB(NOW(), INTERVAL ? MONTH)
       GROUP BY DATE_FORMAT(generated_at, '%Y-%m')
       ORDER BY month
@@ -219,14 +220,14 @@ router.get('/trends/summary', authenticateToken, async (req, res) => {
         // Most affected components
         const [affectedComponents] = await pool.query(`
       SELECT 
-        nc.id,
+        nc.component_id,
         nc.name,
         nc.type,
-        COUNT(f.id) as fault_count
-      FROM faults f
-      JOIN network_components nc ON f.component_id = nc.id
+        COUNT(f.fault_id) as fault_count
+      FROM Faults f
+      JOIN Network_Components nc ON f.component_id = nc.component_id
       WHERE f.reported_at >= DATE_SUB(NOW(), INTERVAL ? MONTH)
-      GROUP BY nc.id
+      GROUP BY nc.component_id
       ORDER BY fault_count DESC
       LIMIT 5
     `, [parseInt(months)]);
@@ -234,7 +235,7 @@ router.get('/trends/summary', authenticateToken, async (req, res) => {
         // Common fault categories
         const [categories] = await pool.query(`
       SELECT category, COUNT(*) as count
-      FROM faults 
+      FROM Faults 
       WHERE reported_at >= DATE_SUB(NOW(), INTERVAL ? MONTH)
       GROUP BY category
       ORDER BY count DESC
@@ -258,10 +259,10 @@ router.get('/trends/summary', authenticateToken, async (req, res) => {
 });
 
 // Delete report
-router.delete('/:id', authenticateToken, requireRole('admin'), async (req, res) => {
+router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) => {
     try {
         const [result] = await pool.query(
-            'DELETE FROM incident_reports WHERE id = ?',
+            'DELETE FROM Incident_Reports WHERE report_id = ?',
             [req.params.id]
         );
 

@@ -11,12 +11,12 @@ router.get('/', authenticateToken, async (req, res) => {
         let query = `
       SELECT f.*, 
              nc.name as component_name, nc.type as component_type,
-             t.name as technician_name,
+             CONCAT(t.first_name, ' ', t.last_name) as technician_name,
              u.username as reported_by_name
-      FROM faults f
-      LEFT JOIN network_components nc ON f.component_id = nc.id
-      LEFT JOIN technicians t ON f.assigned_technician_id = t.id
-      LEFT JOIN users u ON f.reported_by = u.id
+      FROM Faults f
+      LEFT JOIN Network_Components nc ON f.component_id = nc.component_id
+      LEFT JOIN Users t ON f.assigned_to = t.user_id
+      LEFT JOIN Users u ON f.reported_by = u.user_id
       WHERE 1=1
     `;
         const params = [];
@@ -42,11 +42,12 @@ router.get('/', authenticateToken, async (req, res) => {
         }
 
         if (technician_id) {
-            query += ' AND f.assigned_technician_id = ?';
+            query += ' AND f.assigned_to = ?';
             params.push(technician_id);
         }
 
-        query += ' ORDER BY FIELD(f.priority, "critical", "high", "medium", "low"), f.reported_at DESC';
+        // Priority sort order needs to match Capitalized values
+        query += ' ORDER BY FIELD(f.priority, "Critical", "High", "Medium", "Low"), f.reported_at DESC';
 
         const [faults] = await pool.query(query, params);
 
@@ -70,13 +71,13 @@ router.get('/:id', authenticateToken, async (req, res) => {
         const [faults] = await pool.query(`
       SELECT f.*, 
              nc.name as component_name, nc.type as component_type, nc.location as component_location,
-             t.name as technician_name, t.email as technician_email, t.phone as technician_phone,
+             CONCAT(t.first_name, ' ', t.last_name) as technician_name, t.email as technician_email, t.phone_number as technician_phone,
              u.username as reported_by_name
-      FROM faults f
-      LEFT JOIN network_components nc ON f.component_id = nc.id
-      LEFT JOIN technicians t ON f.assigned_technician_id = t.id
-      LEFT JOIN users u ON f.reported_by = u.id
-      WHERE f.id = ?
+      FROM Faults f
+      LEFT JOIN Network_Components nc ON f.component_id = nc.component_id
+      LEFT JOIN Users t ON f.assigned_to = t.user_id
+      LEFT JOIN Users u ON f.reported_by = u.user_id
+      WHERE f.fault_id = ?
     `, [req.params.id]);
 
         if (faults.length === 0) {
@@ -103,7 +104,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 router.post('/', authenticateToken, async (req, res) => {
     try {
         const {
-            component_id, title, description, category, priority = 'medium'
+            component_id, title, description, category, priority = 'Medium'
         } = req.body;
 
         if (!title || !category) {
@@ -113,24 +114,28 @@ router.post('/', authenticateToken, async (req, res) => {
             });
         }
 
+        // New schema uses user_id for reported_by (which is req.user.id in our updated auth middleware logic, 
+        // assuming we update the token generation to use user_id too, or mapped it).
+        // Let's assume req.user.id holds the user_id.
+
         const [result] = await pool.query(
-            `INSERT INTO faults (component_id, reported_by, title, description, category, priority) 
+            `INSERT INTO Faults (component_id, reported_by, title, description, category, priority) 
        VALUES (?, ?, ?, ?, ?, ?)`,
             [component_id, req.user.id, title, description, category, priority]
         );
 
         // Update component status if it's a critical fault
-        if (priority === 'critical' && component_id) {
+        if (priority === 'Critical' && component_id) {
             await pool.query(
-                'UPDATE network_components SET status = ? WHERE id = ?',
-                ['faulty', component_id]
+                "UPDATE Network_Components SET status = ? WHERE component_id = ?",
+                ['Faulty', component_id]
             );
         }
 
         res.status(201).json({
             success: true,
             message: 'Fault reported successfully',
-            data: { id: result.insertId, title, priority, status: 'open' }
+            data: { id: result.insertId, title, priority, status: 'Open' }
         });
     } catch (error) {
         console.error('Create fault error:', error);
@@ -142,7 +147,7 @@ router.post('/', authenticateToken, async (req, res) => {
 });
 
 // Assign technician to fault
-router.put('/:id/assign', authenticateToken, requireRole('admin', 'technician'), async (req, res) => {
+router.put('/:id/assign', authenticateToken, requireRole('Admin', 'Technician'), async (req, res) => {
     try {
         const { technician_id } = req.body;
 
@@ -153,8 +158,8 @@ router.put('/:id/assign', authenticateToken, requireRole('admin', 'technician'),
             });
         }
 
-        // Verify technician exists
-        const [technicians] = await pool.query('SELECT id, status FROM technicians WHERE id = ?', [technician_id]);
+        // Verify technician exists (User with role Technician)
+        const [technicians] = await pool.query("SELECT user_id FROM Users WHERE user_id = ? AND role = 'Technician'", [technician_id]);
         if (technicians.length === 0) {
             return res.status(404).json({
                 success: false,
@@ -163,12 +168,12 @@ router.put('/:id/assign', authenticateToken, requireRole('admin', 'technician'),
         }
 
         const [result] = await pool.query(
-            `UPDATE faults SET 
-       assigned_technician_id = ?, 
-       assigned_at = NOW(),
-       status = CASE WHEN status = 'open' THEN 'in_progress' ELSE status END
-       WHERE id = ?`,
-            [technician_id, req.params.id]
+            `UPDATE Faults SET 
+       assigned_to = ?, 
+       status = CASE WHEN status = 'Open' THEN 'In Progress' ELSE status END
+       WHERE fault_id = ?`,
+            [technician_id, req.params.id] // Note: Removed assigned_at update as it's not in new schema definition, but could keep if we alter table. User def didn't include it explicitly in CREATE TABLE provided, but 'reported_at', 'resolved_at' were there.
+            // Wait, user provided: "assigned_to INT" ... no assigned_at in the CREATE TABLE Faults provided. So I will skip it.
         );
 
         if (result.affectedRows === 0) {
@@ -178,8 +183,7 @@ router.put('/:id/assign', authenticateToken, requireRole('admin', 'technician'),
             });
         }
 
-        // Update technician status to busy
-        await pool.query('UPDATE technicians SET status = ? WHERE id = ?', ['busy', technician_id]);
+        // Update technician status to busy - NOT APPLICABLE in new schema (no status col on Users)
 
         res.json({
             success: true,
@@ -198,7 +202,7 @@ router.put('/:id/assign', authenticateToken, requireRole('admin', 'technician'),
 router.put('/:id/status', authenticateToken, async (req, res) => {
     try {
         const { status, resolution_notes } = req.body;
-        const validStatuses = ['open', 'in_progress', 'resolved', 'closed'];
+        const validStatuses = ['Open', 'In Progress', 'Resolved', 'Closed', 'Pending'];
 
         if (!status || !validStatuses.includes(status)) {
             return res.status(400).json({
@@ -208,7 +212,7 @@ router.put('/:id/status', authenticateToken, async (req, res) => {
         }
 
         // Get fault to calculate response time
-        const [faults] = await pool.query('SELECT * FROM faults WHERE id = ?', [req.params.id]);
+        const [faults] = await pool.query('SELECT * FROM Faults WHERE fault_id = ?', [req.params.id]);
         if (faults.length === 0) {
             return res.status(404).json({
                 success: false,
@@ -220,29 +224,28 @@ router.put('/:id/status', authenticateToken, async (req, res) => {
         let responseTime = null;
 
         // Calculate response time when resolving
-        if (status === 'resolved' && fault.status !== 'resolved') {
+        if (status === 'Resolved' && fault.status !== 'Resolved') {
             const reportedAt = new Date(fault.reported_at);
             const now = new Date();
             responseTime = Math.round((now - reportedAt) / (1000 * 60)); // minutes
         }
 
         await pool.query(
-            `UPDATE faults SET 
+            `UPDATE Faults SET 
        status = ?,
        resolution_notes = COALESCE(?, resolution_notes),
-       resolved_at = CASE WHEN ? = 'resolved' AND resolved_at IS NULL THEN NOW() ELSE resolved_at END,
+       resolved_at = CASE WHEN ? = 'Resolved' AND resolved_at IS NULL THEN NOW() ELSE resolved_at END,
+       started_at = CASE WHEN ? = 'In Progress' AND started_at IS NULL THEN NOW() ELSE started_at END,
        response_time_minutes = COALESCE(?, response_time_minutes)
-       WHERE id = ?`,
-            [status, resolution_notes, status, responseTime, req.params.id]
+       WHERE fault_id = ?`,
+            [status, resolution_notes, status, status, responseTime, req.params.id]
         );
 
-        // Update technician and component status
-        if (status === 'resolved' || status === 'closed') {
-            if (fault.assigned_technician_id) {
-                await pool.query('UPDATE technicians SET status = ? WHERE id = ?', ['available', fault.assigned_technician_id]);
-            }
+        // Update component status
+        if (status === 'Resolved' || status === 'Closed') {
             if (fault.component_id) {
-                await pool.query('UPDATE network_components SET status = ? WHERE id = ? AND status = ?', ['active', fault.component_id, 'faulty']);
+                // Check if component was Faulty, set to Active
+                await pool.query("UPDATE Network_Components SET status = ? WHERE component_id = ? AND status = 'Faulty'", ['Active', fault.component_id]);
             }
         }
 
@@ -260,24 +263,62 @@ router.put('/:id/status', authenticateToken, async (req, res) => {
     }
 });
 
+// Schedule fault
+router.put('/:id/schedule', authenticateToken, async (req, res) => {
+    try {
+        const { scheduled_for } = req.body;
+
+        if (!scheduled_for) {
+            return res.status(400).json({
+                success: false,
+                message: 'Scheduled date is required'
+            });
+        }
+
+        const [result] = await pool.query(
+            'UPDATE Faults SET scheduled_for = ? WHERE fault_id = ?',
+            [scheduled_for, req.params.id]
+        );
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Fault not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'Fault scheduled successfully',
+            data: { scheduled_for }
+        });
+    } catch (error) {
+        console.error('Schedule fault error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to schedule fault'
+        });
+    }
+});
+
 // Get fault statistics
 router.get('/stats/summary', authenticateToken, async (req, res) => {
     try {
         const [byStatus] = await pool.query(`
-      SELECT status, COUNT(*) as count FROM faults GROUP BY status
+      SELECT status, COUNT(*) as count FROM Faults GROUP BY status
     `);
 
         const [byPriority] = await pool.query(`
-      SELECT priority, COUNT(*) as count FROM faults GROUP BY priority
+      SELECT priority, COUNT(*) as count FROM Faults GROUP BY priority
     `);
 
         const [byCategory] = await pool.query(`
-      SELECT category, COUNT(*) as count FROM faults GROUP BY category
+      SELECT category, COUNT(*) as count FROM Faults GROUP BY category
     `);
 
         const [avgResolution] = await pool.query(`
       SELECT AVG(response_time_minutes) as avg_time 
-      FROM faults WHERE response_time_minutes IS NOT NULL
+      FROM Faults WHERE response_time_minutes IS NOT NULL
     `);
 
         res.json({

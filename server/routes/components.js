@@ -8,7 +8,7 @@ const router = express.Router();
 router.get('/', authenticateToken, async (req, res) => {
     try {
         const { type, status, search } = req.query;
-        let query = 'SELECT * FROM network_components WHERE 1=1';
+        let query = 'SELECT * FROM Network_Components WHERE 1=1';
         const params = [];
 
         if (type) {
@@ -22,8 +22,8 @@ router.get('/', authenticateToken, async (req, res) => {
         }
 
         if (search) {
-            query += ' AND (name LIKE ? OR location LIKE ? OR serial_number LIKE ?)';
-            params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+            query += ' AND (name LIKE ? OR location LIKE ?)';
+            params.push(`%${search}%`, `%${search}%`);
         }
 
         query += ' ORDER BY created_at DESC';
@@ -48,7 +48,7 @@ router.get('/', authenticateToken, async (req, res) => {
 router.get('/:id', authenticateToken, async (req, res) => {
     try {
         const [components] = await pool.query(
-            'SELECT * FROM network_components WHERE id = ?',
+            'SELECT * FROM Network_Components WHERE component_id = ?',
             [req.params.id]
         );
 
@@ -59,19 +59,19 @@ router.get('/:id', authenticateToken, async (req, res) => {
             });
         }
 
-        // Get maintenance history
+        // Get maintenance history - using Maintenance_Logs
         const [maintenance] = await pool.query(
-            `SELECT mh.*, t.name as technician_name 
-       FROM maintenance_history mh 
-       LEFT JOIN technicians t ON mh.technician_id = t.id 
+            `SELECT mh.*, t.full_name as technician_name 
+       FROM Maintenance_Logs mh 
+       LEFT JOIN Users t ON mh.technician_id = t.user_id 
        WHERE mh.component_id = ? 
-       ORDER BY mh.performed_at DESC`,
+       ORDER BY mh.activity_date DESC`,
             [req.params.id]
         );
 
         // Get active faults
         const [faults] = await pool.query(
-            `SELECT * FROM faults WHERE component_id = ? AND status != 'closed' ORDER BY reported_at DESC`,
+            `SELECT * FROM Faults WHERE component_id = ? AND status != 'Closed' ORDER BY reported_at DESC`,
             [req.params.id]
         );
 
@@ -93,12 +93,12 @@ router.get('/:id', authenticateToken, async (req, res) => {
 });
 
 // Create new component
-router.post('/', authenticateToken, requireRole('admin', 'technician'), async (req, res) => {
+router.post('/', authenticateToken, requireRole('Admin', 'Technician'), async (req, res) => {
     try {
         const {
-            name, type, model, manufacturer, serial_number,
-            ip_address, mac_address, location, status = 'active',
-            configuration, installed_at
+            name, type, model_number,
+            ip_address, mac_address, location, status = 'Active',
+            config_details, install_date
         } = req.body;
 
         if (!name || !type) {
@@ -109,11 +109,11 @@ router.post('/', authenticateToken, requireRole('admin', 'technician'), async (r
         }
 
         const [result] = await pool.query(
-            `INSERT INTO network_components 
-       (name, type, model, manufacturer, serial_number, ip_address, mac_address, location, status, configuration, installed_at) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [name, type, model, manufacturer, serial_number, ip_address, mac_address, location, status,
-                configuration ? JSON.stringify(configuration) : null, installed_at]
+            `INSERT INTO Network_Components 
+       (name, type, model_number, ip_address, mac_address, location, status, config_details, install_date) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [name, type, model_number, ip_address, mac_address, location, status,
+                config_details, install_date]
         );
 
         res.status(201).json({
@@ -123,12 +123,6 @@ router.post('/', authenticateToken, requireRole('admin', 'technician'), async (r
         });
     } catch (error) {
         console.error('Create component error:', error);
-        if (error.code === 'ER_DUP_ENTRY') {
-            return res.status(409).json({
-                success: false,
-                message: 'Serial number already exists'
-            });
-        }
         res.status(500).json({
             success: false,
             message: 'Failed to create component'
@@ -137,29 +131,27 @@ router.post('/', authenticateToken, requireRole('admin', 'technician'), async (r
 });
 
 // Update component
-router.put('/:id', authenticateToken, requireRole('admin', 'technician'), async (req, res) => {
+router.put('/:id', authenticateToken, requireRole('Admin', 'Technician'), async (req, res) => {
     try {
         const {
-            name, type, model, manufacturer, serial_number,
-            ip_address, mac_address, location, status, configuration, installed_at
+            name, type, model_number,
+            ip_address, mac_address, location, status, config_details, install_date
         } = req.body;
 
         const [result] = await pool.query(
-            `UPDATE network_components SET 
+            `UPDATE Network_Components SET 
        name = COALESCE(?, name),
        type = COALESCE(?, type),
-       model = COALESCE(?, model),
-       manufacturer = COALESCE(?, manufacturer),
-       serial_number = COALESCE(?, serial_number),
+       model_number = COALESCE(?, model_number),
        ip_address = COALESCE(?, ip_address),
        mac_address = COALESCE(?, mac_address),
        location = COALESCE(?, location),
        status = COALESCE(?, status),
-       configuration = COALESCE(?, configuration),
-       installed_at = COALESCE(?, installed_at)
-       WHERE id = ?`,
-            [name, type, model, manufacturer, serial_number, ip_address, mac_address, location, status,
-                configuration ? JSON.stringify(configuration) : null, installed_at, req.params.id]
+       config_details = COALESCE(?, config_details),
+       install_date = COALESCE(?, install_date)
+       WHERE component_id = ?`,
+            [name, type, model_number, ip_address, mac_address, location, status,
+                config_details, install_date, req.params.id]
         );
 
         if (result.affectedRows === 0) {
@@ -183,10 +175,10 @@ router.put('/:id', authenticateToken, requireRole('admin', 'technician'), async 
 });
 
 // Delete component
-router.delete('/:id', authenticateToken, requireRole('admin'), async (req, res) => {
+router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) => {
     try {
         const [result] = await pool.query(
-            'DELETE FROM network_components WHERE id = ?',
+            'DELETE FROM Network_Components WHERE component_id = ?',
             [req.params.id]
         );
 
@@ -215,13 +207,13 @@ router.get('/stats/summary', authenticateToken, async (req, res) => {
     try {
         const [typeStats] = await pool.query(`
       SELECT type, COUNT(*) as count, 
-             SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_count
-      FROM network_components 
+             SUM(CASE WHEN status = 'Active' THEN 1 ELSE 0 END) as active_count
+      FROM Network_Components 
       GROUP BY type
     `);
 
         const [statusStats] = await pool.query(`
-      SELECT status, COUNT(*) as count FROM network_components GROUP BY status
+      SELECT status, COUNT(*) as count FROM Network_Components GROUP BY status
     `);
 
         res.json({

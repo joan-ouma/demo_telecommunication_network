@@ -8,18 +8,18 @@ const router = express.Router();
 // Register new user
 router.post('/register', async (req, res) => {
     try {
-        const { username, email, password, role = 'viewer' } = req.body;
+        const { username, email, password, first_name, last_name, phone_number, role = 'Viewer' } = req.body;
 
-        if (!username || !email || !password) {
+        if (!username || !email || !password || !first_name || !last_name) {
             return res.status(400).json({
                 success: false,
-                message: 'Username, email, and password are required'
+                message: 'Username, email, first name, last name, and password are required'
             });
         }
 
         // Check if user already exists
         const [existing] = await pool.query(
-            'SELECT id FROM users WHERE username = ? OR email = ?',
+            'SELECT user_id FROM Users WHERE username = ? OR email = ?',
             [username, email]
         );
 
@@ -35,8 +35,8 @@ router.post('/register', async (req, res) => {
 
         // Insert new user
         const [result] = await pool.query(
-            'INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)',
-            [username, email, hashedPassword, role]
+            'INSERT INTO Users (username, email, password_hash, first_name, last_name, phone_number, role) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [username, email, hashedPassword, first_name, last_name, phone_number, role]
         );
 
         const token = generateToken({
@@ -50,7 +50,7 @@ router.post('/register', async (req, res) => {
             success: true,
             message: 'User registered successfully',
             data: {
-                id: result.insertId,
+                user_id: result.insertId,
                 username,
                 email,
                 role,
@@ -80,7 +80,7 @@ router.post('/login', async (req, res) => {
 
         // Find user
         const [users] = await pool.query(
-            'SELECT * FROM users WHERE username = ? OR email = ?',
+            'SELECT * FROM Users WHERE username = ? OR email = ?',
             [username, username]
         );
 
@@ -94,7 +94,7 @@ router.post('/login', async (req, res) => {
         const user = users[0];
 
         // Verify password
-        const validPassword = await bcrypt.compare(password, user.password);
+        const validPassword = await bcrypt.compare(password, user.password_hash);
         if (!validPassword) {
             return res.status(401).json({
                 success: false,
@@ -102,16 +102,24 @@ router.post('/login', async (req, res) => {
             });
         }
 
-        const token = generateToken(user);
+        const token = generateToken({
+            id: user.user_id,
+            username: user.username,
+            email: user.email,
+            role: user.role
+        });
 
         res.json({
             success: true,
             message: 'Login successful',
             data: {
-                id: user.id,
+                user_id: user.user_id,
                 username: user.username,
                 email: user.email,
                 role: user.role,
+                first_name: user.first_name,
+                last_name: user.last_name,
+                name: `${user.first_name} ${user.last_name}`,
                 token
             }
         });
@@ -141,7 +149,7 @@ router.get('/profile', async (req, res) => {
         const decoded = jwt.default.verify(token, process.env.JWT_SECRET || 'telecom_network_secret_key_2024');
 
         const [users] = await pool.query(
-            'SELECT id, username, email, role, created_at FROM users WHERE id = ?',
+            'SELECT user_id, username, email, role, full_name, phone_number, created_at FROM Users WHERE user_id = ?',
             [decoded.id]
         );
 
