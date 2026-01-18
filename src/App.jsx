@@ -9,7 +9,8 @@ import {
     LayoutDashboard, Server, AlertTriangle, BarChart, BarChart2,
     ClipboardList, Wrench, Package, Users, Shield,
     Bell, Search, Menu, X, CheckCircle, Clock,
-    AlertCircle, DollarSign, Activity, FileText, Coins, MapPin
+    AlertCircle, DollarSign, Activity, FileText, Coins, MapPin,
+    Printer, Download
 } from 'lucide-react';
 
 // Fix Leaflet marker icons
