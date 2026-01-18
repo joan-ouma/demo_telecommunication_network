@@ -186,15 +186,14 @@ router.post('/generate', authenticateToken, requireRole('Admin', 'Technician'), 
             success: true,
             message: 'Incident report generated successfully',
             data: {
-                data: {
-                    id: result.insertId,
-                    title,
-                    impact_level: impactLevel,
-                    total_faults: req.body.total_faults || faults.length,
-                    affected_components: req.body.affected_components || affectedComponents[0].count,
-                    avg_resolution_time: req.body.avg_resolution_time || Math.round(avgResolution[0].avg_time || 0)
-                }
-            });
+                id: result.insertId,
+                title,
+                impact_level: impactLevel,
+                total_faults: req.body.total_faults || faults.length,
+                affected_components: req.body.affected_components || affectedComponents[0].count,
+                avg_resolution_time: req.body.avg_resolution_time || Math.round(avgResolution[0].avg_time || 0)
+            }
+        });
 
         // Log report generation
         await logAction({
