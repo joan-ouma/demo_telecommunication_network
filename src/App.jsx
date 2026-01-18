@@ -287,9 +287,7 @@ function Sidebar({ user, onLogout, isOpen, onClose }) {
                     </div>
                 </div>
 
-                {/* Global Search */}
-                {/* Global Search Removed */}
-                <div style={{ marginBottom: 'var(--space-md)' }}></div>
+
 
                 <nav>
                     <ul className="nav-menu">

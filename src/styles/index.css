@@ -116,7 +116,7 @@ body {
   gap: var(--space-md);
   padding-bottom: var(--space-lg);
   border-bottom: 1px solid var(--border-color);
-  margin-bottom: var(--space-lg);
+  margin-bottom: var(--space-md);
 }
 
 .sidebar-logo {
