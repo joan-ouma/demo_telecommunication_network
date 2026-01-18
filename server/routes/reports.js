@@ -273,6 +273,65 @@ router.get('/trends/summary', authenticateToken, async (req, res) => {
     }
 });
 
+// Update incident report
+router.put('/:id', authenticateToken, requireRole('Admin', 'Technician'), async (req, res) => {
+    try {
+        const { title, start_time, end_time, summary, impact_level, total_faults, affected_components, avg_resolution_time } = req.body;
+
+        if (!title || !start_time || !end_time) {
+            return res.status(400).json({
+                success: false,
+                message: 'Title, start time, and end time are required'
+            });
+        }
+
+        const [result] = await pool.query(`
+            UPDATE Incident_Reports 
+            SET title = ?, summary = ?, start_time = ?, end_time = ?, 
+                impact_level = ?, total_faults = ?, affected_components_count = ?, avg_resolution_time = ?
+            WHERE report_id = ?
+        `, [
+            title,
+            summary,
+            start_time,
+            end_time,
+            impact_level,
+            total_faults,
+            affected_components,
+            avg_resolution_time,
+            req.params.id
+        ]);
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Report not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'Report updated successfully'
+        });
+
+        // Log report update
+        await logAction({
+            userId: req.user.id,
+            action: 'UPDATE_REPORT',
+            entityType: 'Report',
+            entityId: req.params.id,
+            details: { title, impact_level },
+            req
+        });
+    } catch (error) {
+        console.error('Update report error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update report'
+        });
+    }
+});
+
 // Delete report
 router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) => {
     try {
