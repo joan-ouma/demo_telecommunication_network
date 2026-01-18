@@ -12,6 +12,11 @@ import faultsRoutes from './server/routes/faults.js';
 import techniciansRoutes from './server/routes/technicians.js';
 import metricsRoutes from './server/routes/metrics.js';
 import reportsRoutes from './server/routes/reports.js';
+import maintenanceRoutes from './server/routes/maintenance.js';
+import searchRoutes from './server/routes/search.js';
+import auditRoutes from './server/routes/audit.js';
+import inventoryRoutes from './server/routes/inventory.js';
+import notificationsRoutes from './server/routes/notifications.js';
 
 dotenv.config();
 
@@ -31,11 +36,16 @@ app.use(express.static(path.join(__dirname, 'dist')));
 
 // API Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/notifications', notificationsRoutes);
 app.use('/api/components', componentsRoutes);
 app.use('/api/faults', faultsRoutes);
 app.use('/api/technicians', techniciansRoutes);
 app.use('/api/metrics', metricsRoutes);
 app.use('/api/reports', reportsRoutes);
+app.use('/api/maintenance', maintenanceRoutes);
+app.use('/api/search', searchRoutes);
+app.use('/api/audit', auditRoutes);
+app.use('/api/inventory', inventoryRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -52,11 +62,11 @@ async function startServer() {
     try {
         await initializeDatabase();
         app.listen(PORT, () => {
-            console.log(`🚀 Server running on http://localhost:${PORT}`);
-            console.log(`📡 API available at http://localhost:${PORT}/api`);
+            console.log(`Server running on http://localhost:${PORT}`);
+            console.log(`API available at http://localhost:${PORT}/api`);
         });
     } catch (error) {
-        console.error('❌ Failed to start server:', error);
+        console.error('Failed to start server:', error);
         process.exit(1);
     }
 }

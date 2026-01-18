@@ -8,6 +8,7 @@ export default defineConfig({
         outDir: 'dist'
     },
     server: {
+        allowedHosts: ['hillocky-hunter-couchant.ngrok-free.dev'],
         port: 5173,
         proxy: {
             '/api': {

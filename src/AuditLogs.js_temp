@@ -1,0 +1,101 @@
+// ... component code ...
+function AuditLogs() {
+    const { role } = useContext(AuthContext) || {};
+    const [logs, setLogs] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [filter, setFilter] = useState({ entity_type: '', action: '' });
+
+    useEffect(() => {
+        loadLogs();
+    }, [filter]);
+
+    const loadLogs = async () => {
+        setLoading(true);
+        try {
+            const queryParams = new URLSearchParams();
+            if (filter.entity_type) queryParams.append('entity_type', filter.entity_type);
+            if (filter.action) queryParams.append('action', filter.action);
+            
+            const response = await fetchAPI(`/audit?${queryParams.toString()}`);
+            setLogs(response); // response is array directly from our API code
+        } catch (error) {
+            console.error('Failed to load audit logs:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const formatDetails = (details) => {
+        try {
+            const parsed = typeof details === 'string' ? JSON.parse(details) : details;
+            
+            // Format nice items for common actions
+            if (parsed.title) return `Title: ${parsed.title}`;
+            if (parsed.status) return `Status changed to: ${parsed.status}`;
+            
+            return JSON.stringify(parsed).substring(0, 50) + (JSON.stringify(parsed).length > 50 ? '...' : '');
+        } catch (e) {
+            return String(details);
+        }
+    };
+
+    return (
+        <div>
+            <div className="page-header">
+                <h1 className="page-title">Audit Trail</h1>
+                <p className="page-subtitle">Track system activity and user actions</p>
+            </div>
+
+            <div className="action-bar">
+                <div className="filter-group">
+                    <select className="filter-select" value={filter.entity_type} onChange={(e) => setFilter({ ...filter, entity_type: e.target.value })}>
+                        <option value="">All Entities</option>
+                        <option value="Fault">Faults</option>
+                        <option value="Report">Reports</option>
+                        <option value="User">Users</option>
+                        <option value="Component">Components</option>
+                    </select>
+                </div>
+                <button className="btn btn-secondary" onClick={loadLogs}>Refresh</button>
+            </div>
+
+            <div className="card">
+                <div className="table-responsive">
+                    <table className="table">
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>User</th>
+                                <th>Action</th>
+                                <th>Entity</th>
+                                <th>Details</th>
+                                <th>IP Address</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {loading ? (
+                                <tr><td colSpan="6" className="text-center">Loading logs...</td></tr>
+                            ) : logs.length > 0 ? (
+                                logs.map(log => (
+                                    <tr key={log.log_id}>
+                                        <td>{new Date(log.created_at).toLocaleString()}</td>
+                                        <td>
+                                            <div style={{ fontWeight: 500 }}>{log.user_name}</div>
+                                            <div className="text-muted" style={{ fontSize: '0.75rem' }}>{log.user_email}</div>
+                                        </td>
+                                        <td><span className="badge badge-secondary">{log.action}</span></td>
+                                        <td>{log.entity_type} #{log.entity_id}</td>
+                                        <td title={log.details}>{formatDetails(log.details)}</td>
+                                        <td className="text-muted">{log.ip_address}</td>
+                                    </tr>
+                                ))
+                            ) : (
+                                <tr><td colSpan="6" className="text-center text-muted">No audit logs found</td></tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    );
+}

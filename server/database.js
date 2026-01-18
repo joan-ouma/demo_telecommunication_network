@@ -65,6 +65,28 @@ export async function initializeDatabase() {
       )
     `);
 
+    // Inventory Items table (missing piece added)
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS Inventory_Items (
+        item_id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        category VARCHAR(50) NOT NULL,
+        quantity INT DEFAULT 0,
+        min_level INT DEFAULT 5,
+        unit_cost DECIMAL(10, 2) DEFAULT 0.00,
+        location VARCHAR(100),
+        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Add latitude/longitude columns if they don't exist
+    try {
+      await connection.query("ALTER TABLE Network_Components ADD COLUMN latitude DECIMAL(10, 8)");
+    } catch (e) { /* Column likely exists */ }
+    try {
+      await connection.query("ALTER TABLE Network_Components ADD COLUMN longitude DECIMAL(11, 8)");
+    } catch (e) { /* Column likely exists */ }
+
     // Faults table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS Faults (
@@ -183,6 +205,7 @@ export async function initializeDatabase() {
 
     // Seed sample data
     await seedSampleData(connection);
+    await seedInventory(connection); // Call separately to ensure it runs even if users exist
 
   } catch (error) {
     console.error('❌ Database initialization error:', error);
@@ -235,22 +258,45 @@ async function seedSampleData(connection) {
 
     // Seed Network Components (Expanded detailed list)
     const componentValues = [
-      ['Main Router - Admin Block', 'Router', 'Cisco ISR 4000', '192.168.1.1', 'Active', 'Admin Block Server Room', '{"vlan": 10, "gateway": "192.168.1.254"}', '2024-01-10'],
-      ['Switch - Hall 7', 'Switch', 'Catalyst 9200', '192.168.2.10', 'Faulty', 'Hall 7 Cabinet', '{"ports": 48, "poe": true}', '2023-05-15'],
-      ['Fiber Link - Gate C', 'Cable', 'Single Mode Fiber', null, 'Active', 'Gate C Underground', '{"length": "500m", "termination": "LC"}', '2022-11-20'],
-      ['Server- Boardroom', 'Server', 'Dell PowerEdge', '10.0.0.5', 'Maintenance', 'Basement', '{"os": "Ubuntu 22.04", "ram": "64GB"}', '2023-08-30'],
-      ['Firewall - Main Gate', 'Firewall', 'FortiGate 60F', '192.168.1.254', 'Active', 'Server Room', '{"fw_ver": "7.2.5"}', '2023-12-01'],
-      ['Access Point - Reception', 'Access Point', 'Ubiquiti UniFi 6', '192.168.3.10', 'Active', 'Reception Ceiling', '{"ssid": "Guest_WiFi"}', '2024-02-15'],
-      ['Switch - Floor 2', 'Switch', 'Cisco 2960', '192.168.2.20', 'Active', 'Floor 2 Cabinet', '{"ports": 24}', '2021-06-10'],
-      ['Storage NAS', 'Server', 'Synology DS920+', '10.0.0.100', 'Active', 'Server Room', '{"raid": "5", "capacity": "16TB"}', '2023-09-01'],
-      ['Router - Branch Office', 'Router', 'MikroTik RB4011', '192.168.10.1', 'Inactive', 'Branch Office', '{"vpn": "enabled"}', '2022-03-10'],
-      ['Backup Link', 'Cable', 'Cat6 shielded', null, 'Active', 'Main Trunk', '{"length": "100m"}', '2022-01-01']
+      // Spreading components out by ~0.002 degrees (~200m) for better map visibility without over-zooming
+
+      // Server Room (Center)
+      ['Core Router - Server Room', 'Router', 'Cisco ISR 4451', '192.168.1.1', 'Active', 'Main Building - Server Room', '{"vlan": 10}', '2024-01-10', -1.2921, 36.8219],
+
+      // Admin Block (North)
+      ['Switch - Admin Wing', 'Switch', 'Catalyst 9300', '192.168.2.10', 'Active', 'Admin Block', '{"ports": 48}', '2023-05-15', -1.2900, 36.8219],
+
+      // Boardroom (North East)
+      ['AP - Boardroom', 'Access Point', 'Ubiquiti UniFi 6 Pro', '192.168.3.5', 'Maintenance', 'Boardroom', '{"ssid": "Staff_Secure"}', '2023-08-30', -1.2905, 36.8235],
+
+      // Reception (East)
+      ['AP - Reception', 'Access Point', 'Ubiquiti UniFi 6 Lite', '192.168.3.10', 'Active', 'Main Lobby', '{"ssid": "Guest_WiFi"}', '2024-02-15', -1.2921, 36.8240],
+
+      // Main Gate (South East) - Faulty (Red)
+      ['Switch - Main Gate', 'Switch', 'Cisco 2960', '192.168.2.20', 'Faulty', 'Security Gate A', '{"ports": 8, "poe": true}', '2021-06-10', -1.2940, 36.8235],
+
+      // Basement/Power (South)
+      ['UPS Monitor - Basement', 'Server', 'APC Smart-UPS', '10.0.0.20', 'Active', 'Power Plant', '{"battery": "100%"}', '2022-11-20', -1.2942, 36.8219],
+
+      // East Wing/Annex (South West)
+      ['Switch - West Wing', 'Switch', 'Catalyst 9200', '192.168.2.15', 'Active', 'West Wing Offices', '{"ports": 24}', '2023-01-10', -1.2935, 36.8200],
+
+      // Cafeteria (West)
+      ['AP - Cafeteria', 'Access Point', 'Ubiquiti UniFi 6 LR', '192.168.3.15', 'Active', 'Staff Cafeteria', '{"ssid": "Staff_Common"}', '2023-09-01', -1.2921, 36.8195],
+
+      // HR Dept (North West)
+      ['Switch - HR Dept', 'Switch', 'Cisco 3560', '192.168.2.30', 'Active', 'HR Loading Dock', '{"ports": 24}', '2022-03-10', -1.2905, 36.8200],
+
+      // Parking Lot (Far North) - Maintenance (Purple)
+      ['Wireless Bridge - Parking', 'Antenna', 'Ubiquiti Nanostation', '192.168.4.5', 'Maintenance', 'Parking North', '{"link_quality": "98%"}', '2022-01-01', -1.2885, 36.8219]
     ];
 
     await connection.query(
-      `INSERT INTO Network_Components (name, type, model_number, ip_address, status, location, config_details, install_date) VALUES ?`,
+      `INSERT INTO Network_Components (name, type, model_number, ip_address, status, location, config_details, install_date, latitude, longitude) VALUES ?`,
       [componentValues]
     );
+
+
 
     // Seed Faults (Expanded list covering more scenarios)
     const oneDayAgo = new Date(now); oneDayAgo.setDate(now.getDate() - 1);
@@ -299,6 +345,28 @@ async function seedSampleData(connection) {
 }
 
 export default pool;
+
+async function seedInventory(connection) {
+  try {
+    const [inventory] = await connection.query('SELECT COUNT(*) as count FROM Inventory_Items');
+    if (inventory[0].count === 0) {
+      console.log('📦 Seeding Inventory Items...');
+      const inventoryItems = [
+        ['Cisco 2960 Switch', 'Switches', 5, 2, 45000.00, 'Store Room A'],
+        ['Cat6 Ethernet Cable (3m)', 'Cables', 150, 20, 500.00, 'Shelf B2'],
+        ['RJ45 Connectors (Pack)', 'Tools', 50, 5, 1200.00, 'Cabinet 1'],
+        ['Crimping Tool', 'Tools', 10, 2, 2500.00, 'Toolbox'],
+        ['Fiber Patch Cord LC-LC', 'Fiber Optics', 30, 5, 1500.00, 'Shelf C1'],
+        ['Ubiquiti UniFi 6 Lite', 'Access Points', 8, 3, 18000.00, 'Store Room A'],
+        ['Fluke Network Tester', 'Tools', 2, 1, 85000.00, 'Safe 1']
+      ];
+      await connection.query('INSERT INTO Inventory_Items (name, category, quantity, min_level, unit_cost, location) VALUES ?', [inventoryItems]);
+      console.log('✅ Inventory seeded');
+    }
+  } catch (e) {
+    console.error('Inventory seed error:', e);
+  }
+}
 
 // Auto-initialize when run directly
 if (import.meta.url === `file://${process.argv[1]}`) {

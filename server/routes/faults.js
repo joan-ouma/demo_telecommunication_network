@@ -211,6 +211,13 @@ assigned_to = ?,
 
         // Update technician status to busy - NOT APPLICABLE in new schema (no status col on Users)
 
+        // Notify Technician
+        await pool.query(
+            `INSERT INTO Notifications(user_id, type, message, link)
+        VALUES(?, 'fault_assigned', ?, ?)`,
+            [technician_id, `You have been assigned fault FLT-${String(req.params.id).padStart(3, '0')}`, `/faults`]
+        );
+
         res.json({
             success: true,
             message: 'Technician assigned successfully'
@@ -273,6 +280,15 @@ status = ?,
                 // Check if component was Faulty, set to Active
                 await pool.query("UPDATE Network_Components SET status = ? WHERE component_id = ? AND status = 'Faulty'", ['Active', fault.component_id]);
             }
+        }
+
+        // Notify Reporter
+        if (fault.reported_by && fault.reported_by !== req.user.id) {
+            await pool.query(
+                `INSERT INTO Notifications(user_id, type, message, link)
+        VALUES(?, 'status_change', ?, ?)`,
+                [fault.reported_by, `Fault FLT-${String(req.params.id).padStart(3, '0')} is now ${status}`, `/faults`]
+            );
         }
 
         // Log status update

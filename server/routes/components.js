@@ -99,7 +99,7 @@ router.post('/', authenticateToken, requireRole('Admin', 'Technician'), async (r
         const {
             name, type, model_number,
             ip_address, mac_address, location, status = 'Active',
-            config_details, install_date
+            config_details, install_date, latitude, longitude
         } = req.body;
 
         if (!name || !type) {
@@ -111,10 +111,10 @@ router.post('/', authenticateToken, requireRole('Admin', 'Technician'), async (r
 
         const [result] = await pool.query(
             `INSERT INTO Network_Components 
-       (name, type, model_number, ip_address, mac_address, location, status, config_details, install_date) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (name, type, model_number, ip_address, mac_address, location, status, config_details, install_date, latitude, longitude) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [name, type, model_number, ip_address, mac_address, location, status,
-                config_details, install_date]
+                config_details, install_date, latitude, longitude]
         );
 
         res.status(201).json({
@@ -146,7 +146,7 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'Technician'), async 
     try {
         const {
             name, type, model_number,
-            ip_address, mac_address, location, status, config_details, install_date
+            ip_address, mac_address, location, status, config_details, install_date, latitude, longitude
         } = req.body;
 
         const [result] = await pool.query(
@@ -159,10 +159,12 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'Technician'), async 
        location = COALESCE(?, location),
        status = COALESCE(?, status),
        config_details = COALESCE(?, config_details),
-       install_date = COALESCE(?, install_date)
+       install_date = COALESCE(?, install_date),
+       latitude = COALESCE(?, latitude),
+       longitude = COALESCE(?, longitude)
        WHERE component_id = ?`,
             [name, type, model_number, ip_address, mac_address, location, status,
-                config_details, install_date, req.params.id]
+                config_details, install_date, latitude, longitude, req.params.id]
         );
 
         if (result.affectedRows === 0) {

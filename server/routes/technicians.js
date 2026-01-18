@@ -20,7 +20,7 @@ router.get('/', authenticateToken, async (req, res) => {
       SELECT user_id as id, CONCAT(first_name, ' ', last_name) as name, email, phone_number as phone, role, created_at, status,
              (SELECT COUNT(*) FROM Faults f WHERE f.assigned_to = u.user_id AND f.status IN ('Open', 'In Progress')) as active_faults
       FROM Users u
-      WHERE u.role = 'Technician'
+      WHERE u.role IN ('Technician', 'Staff')
     `;
         const params = [];
 
@@ -105,10 +105,11 @@ router.get('/:id', authenticateToken, async (req, res) => {
 });
 
 // Create new technician
-router.post('/', authenticateToken, requireRole('Admin'), async (req, res) => {
+router.post('/', authenticateToken, requireRole('Admin', 'Manager'), async (req, res) => {
     try {
-        // Since technicians are just users now, this endpoint creates a User with role='Technician'
-        const { username, email, first_name, last_name, phone_number, password } = req.body;
+        // This endpoint creates a User with role='Technician' or 'Staff'
+        const { username, email, first_name, last_name, phone_number, password, role } = req.body;
+        const userRole = role === 'Staff' ? 'Staff' : 'Technician';
 
         if (!username || !email || !first_name || !last_name || !password) {
             return res.status(400).json({
@@ -122,13 +123,13 @@ router.post('/', authenticateToken, requireRole('Admin'), async (req, res) => {
 
         const [result] = await pool.query(
             'INSERT INTO Users (username, email, password_hash, first_name, last_name, phone_number, role) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [username, email, hashedPassword, first_name, last_name, phone_number, 'Technician']
+            [username, email, hashedPassword, first_name, last_name, phone_number, userRole]
         );
 
         res.status(201).json({
             success: true,
-            message: 'Technician created successfully',
-            data: { id: result.insertId, name: `${first_name} ${last_name}`, email }
+            message: `${userRole} created successfully`,
+            data: { id: result.insertId, name: `${first_name} ${last_name}`, email, role: userRole }
         });
 
         // Log technician creation
@@ -150,7 +151,7 @@ router.post('/', authenticateToken, requireRole('Admin'), async (req, res) => {
 });
 
 // Update technician
-router.put('/:id', authenticateToken, requireRole('Admin'), async (req, res) => {
+router.put('/:id', authenticateToken, requireRole('Admin', 'Manager'), async (req, res) => {
     try {
         const { first_name, last_name, email, phone_number } = req.body;
 
@@ -252,7 +253,7 @@ router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) 
 // REMOVED: The new schema does not have a status column for Users/Technicians.
 // We'll keep the route to prevent 404s but make it a no-op or return 400.
 // Reset technician password
-router.put('/:id/password', authenticateToken, requireRole('Admin'), async (req, res) => {
+router.put('/:id/password', authenticateToken, requireRole('Admin', 'Manager'), async (req, res) => {
     try {
         const { password } = req.body;
 
@@ -291,7 +292,7 @@ router.put('/:id/password', authenticateToken, requireRole('Admin'), async (req,
     }
 });
 
-router.put('/:id/status', authenticateToken, requireRole('Admin'), async (req, res) => {
+router.put('/:id/status', authenticateToken, requireRole('Admin', 'Manager'), async (req, res) => {
     try {
         const { status } = req.body;
 

@@ -133,15 +133,13 @@ body {
 .sidebar-title {
   font-size: 1.25rem;
   font-weight: 700;
-  background: var(--gradient-primary);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #FEFAE0;
+  letter-spacing: 0.5px;
 }
 
 .sidebar-subtitle {
   font-size: 0.75rem;
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.7);
 }
 
 /* Navigation */
@@ -159,7 +157,7 @@ body {
   align-items: center;
   gap: var(--space-md);
   padding: var(--space-md) var(--space-lg);
-  color: var(--text-secondary);
+  color: rgba(255, 255, 255, 0.85);
   text-decoration: none;
   border-radius: var(--radius-md);
   transition: all var(--transition-fast);
@@ -168,14 +166,15 @@ body {
 }
 
 .nav-link:hover {
-  background: rgba(96, 108, 56, 0.15);
-  color: var(--text-primary);
+  background: rgba(96, 108, 56, 0.4);
+  color: lightgreen;
 }
 
 .nav-link.active {
-  background: var(--gradient-primary);
-  color: white;
-  box-shadow: var(--shadow-glow);
+  background: var(--bg-primary);
+  color: var(--accent-primary);
+  font-weight: 700;
+  box-shadow: var(--shadow-md);
 }
 
 .nav-icon {
@@ -855,14 +854,15 @@ body {
 }
 
 .login-title {
-  font-size: 1.5rem;
+  font-size: 2.5rem;
   font-weight: 700;
   margin-bottom: var(--space-xs);
+  color: #ffffff;
 }
 
 .login-subtitle {
-  color: var(--text-secondary);
-  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.95rem;
 }
 
 /* ========================================

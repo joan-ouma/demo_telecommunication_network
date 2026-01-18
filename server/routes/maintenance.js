@@ -51,34 +51,81 @@ router.get('/', authenticateToken, async (req, res) => {
 });
 
 // Create new maintenance log
-router.post('/', authenticateToken, requireRole('Admin', 'Technician'), async (req, res) => {
+router.post('/', authenticateToken, requireRole('Admin', 'Technician', 'Manager'), async (req, res) => {
+    let connection;
     try {
-        const { component_id, action_taken, result, duration_minutes, activity_date } = req.body;
+        const { component_id, action_taken, result, duration_minutes, activity_date, parts_used } = req.body;
 
         if (!component_id || !action_taken) {
-            return res.status(400).json({
-                success: false,
-                message: 'Component ID and action taken are required'
-            });
+            return res.status(400).json({ success: false, message: 'Component ID and action taken are required' });
         }
 
-        const [resDb] = await pool.query(
+        connection = await pool.getConnection();
+        await connection.beginTransaction();
+
+        // 1. Create Log
+        const [resDb] = await connection.query(
             `INSERT INTO Maintenance_Logs(component_id, technician_id, action_taken, result, duration_minutes, activity_date)
-VALUES(?, ?, ?, ?, ?, COALESCE(?, NOW()))`,
+             VALUES(?, ?, ?, ?, ?, COALESCE(?, NOW()))`,
             [component_id, req.user.id, action_taken, result || 'Success', duration_minutes, activity_date]
         );
+        const logId = resDb.insertId;
+
+        // 2. Handle Parts Used (Inventory Deduction)
+        if (parts_used && Array.isArray(parts_used) && parts_used.length > 0) {
+            for (const part of parts_used) {
+                // Check stock
+                const [item] = await connection.query('SELECT quantity, name, min_level FROM Inventory WHERE item_id = ?', [part.inventory_id]);
+                if (item.length === 0) throw new Error(`Part ID ${part.inventory_id} not found`);
+
+                if (item[0].quantity < part.quantity) {
+                    throw new Error(`Insufficient stock for ${item[0].name} (Available: ${item[0].quantity})`);
+                }
+
+                // Deduct stock
+                await connection.query('UPDATE Inventory SET quantity = quantity - ? WHERE item_id = ?', [part.quantity, part.inventory_id]);
+
+                // Check low stock triggers (optional notification logic here, but avoiding complex circular deps for now)
+            }
+        }
+
+        await connection.commit();
 
         res.status(201).json({
             success: true,
             message: 'Maintenance log created successfully',
-            data: { id: resDb.insertId }
+            data: { id: logId }
         });
     } catch (error) {
+        if (connection) await connection.rollback();
         console.error('Create maintenance log error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to create maintenance log'
-        });
+        res.status(500).json({ success: false, message: error.message || 'Failed to create maintenance log' });
+    } finally {
+        if (connection) connection.release();
+    }
+});
+
+// Update maintenance log (Admin, Manager)
+router.put('/:id', authenticateToken, requireRole('Admin', 'Manager'), async (req, res) => {
+    try {
+        const { action_taken, result, duration_minutes } = req.body;
+        await pool.query(
+            `UPDATE Maintenance_Logs SET action_taken = ?, result = ?, duration_minutes = ? WHERE log_id = ?`,
+            [action_taken, result, duration_minutes, req.params.id]
+        );
+        res.json({ success: true, message: 'Log updated successfully' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// Delete maintenance log (Admin only)
+router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) => {
+    try {
+        await pool.query('DELETE FROM Maintenance_Logs WHERE log_id = ?', [req.params.id]);
+        res.json({ success: true, message: 'Log deleted successfully' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
     }
 });
 
