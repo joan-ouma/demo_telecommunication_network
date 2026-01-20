@@ -161,7 +161,7 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'Manager'), async (re
        last_name = COALESCE(?, last_name),
        email = COALESCE(?, email),
        phone_number = COALESCE(?, phone_number)
-       WHERE user_id = ? AND role = 'Technician'`,
+       WHERE user_id = ?`,
             [first_name, last_name, email, phone_number, req.params.id]
         );
 
@@ -200,7 +200,7 @@ router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) 
     try {
         // First check if technician exists
         const [existing] = await pool.query(
-            "SELECT user_id, status FROM Users WHERE user_id = ? AND role = 'Technician'",
+            "SELECT user_id, status FROM Users WHERE user_id = ?",
             [req.params.id]
         );
 
@@ -214,7 +214,7 @@ router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) 
         // Try to actually delete
         try {
             await pool.query(
-                "DELETE FROM Users WHERE user_id = ? AND role = 'Technician'",
+                "DELETE FROM Users WHERE user_id = ?",
                 [req.params.id]
             );
             res.json({

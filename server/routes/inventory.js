@@ -17,7 +17,7 @@ router.get('/', authenticateToken, async (req, res) => {
             params.push(category);
         }
 
-        query += ' ORDER BY category, name';
+        query += ' ORDER BY item_id ASC';
 
         const [items] = await pool.query(query, params);
 
@@ -198,6 +198,66 @@ router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) 
             success: false,
             message: 'Failed to delete item'
         });
+    }
+});
+
+// Use inventory item
+router.post('/:id/use', authenticateToken, async (req, res) => {
+    try {
+        const { quantity, reason } = req.body;
+        const itemId = req.params.id;
+
+        if (!quantity || quantity <= 0) {
+            return res.status(400).json({ success: false, message: 'Valid quantity required' });
+        }
+
+        const [itemRes] = await pool.query('SELECT * FROM Inventory_Items WHERE item_id = ?', [itemId]);
+        if (itemRes.length === 0) {
+            return res.status(404).json({ success: false, message: 'Item not found' });
+        }
+        const item = itemRes[0];
+
+        if (item.quantity < quantity) {
+            return res.status(400).json({ success: false, message: 'Insufficient stock' });
+        }
+
+        const newQuantity = item.quantity - quantity;
+
+        // Update quantity
+        await pool.query('UPDATE Inventory_Items SET quantity = ? WHERE item_id = ?', [newQuantity, itemId]);
+
+        // Log usage
+        await pool.query(
+            'INSERT INTO Inventory_Usage_Logs (item_id, user_id, quantity_used, reason) VALUES (?, ?, ?, ?)',
+            [itemId, req.user.id, quantity, reason || 'Used in field']
+        );
+
+        // Check for low stock and notify
+        if (newQuantity <= item.min_level) {
+            const [admins] = await pool.query("SELECT user_id FROM Users WHERE role IN ('Admin', 'Manager') AND status = 'Active'");
+            for (const admin of admins) {
+                await pool.query(
+                    `INSERT INTO Notifications(user_id, type, message, link)
+                     VALUES(?, 'low_stock', ?, ?)`,
+                    [admin.user_id, `Low Stock Alert: ${item.name} used by ${req.user.username}. Remaining: ${newQuantity}`, `/inventory`]
+                );
+            }
+        }
+
+        await logAction({
+            userId: req.user.id,
+            action: 'USE_INVENTORY_ITEM',
+            entityType: 'Inventory',
+            entityId: itemId,
+            details: { quantity, reason, new_balance: newQuantity },
+            req
+        });
+
+        res.json({ success: true, message: 'Item usage recorded', new_quantity: newQuantity });
+
+    } catch (error) {
+        console.error('Use inventory item error:', error);
+        res.status(500).json({ success: false, message: 'Failed to record usage' });
     }
 });
 

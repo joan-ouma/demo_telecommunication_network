@@ -316,16 +316,15 @@ router.get('/kpi', authenticateToken, async (req, res) => {
       SELECT 
         u.user_id,
         CONCAT(u.first_name, ' ', u.last_name) as name,
-        COUNT(f.fault_id) as resolved_count,
-        AVG(f.response_time_minutes) as avg_resolution_time
+        COUNT(CASE WHEN f.status IN ('Resolved', 'Closed') AND f.resolved_at >= DATE_SUB(NOW(), INTERVAL ? DAY) THEN 1 END) as resolved_count,
+        COUNT(CASE WHEN f.assigned_to = u.user_id AND f.reported_at >= DATE_SUB(NOW(), INTERVAL ? DAY) THEN 1 END) as assigned_count,
+        AVG(CASE WHEN f.status IN ('Resolved', 'Closed') AND f.resolved_at >= DATE_SUB(NOW(), INTERVAL ? DAY) THEN f.response_time_minutes END) as avg_resolution_time
       FROM Users u
       LEFT JOIN Faults f ON u.user_id = f.assigned_to
       WHERE u.role = 'Technician'
-        AND f.status IN ('Resolved', 'Closed')
-        AND f.resolved_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
       GROUP BY u.user_id
       ORDER BY resolved_count DESC
-    `, [days]);
+    `, [days, days, days]);
 
     res.json({
       success: true,

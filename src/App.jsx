@@ -393,7 +393,7 @@ function Dashboard() {
                     <div className="stat-icon warning"><Clock size={24} /></div>
                     <div className="stat-content">
                         <div className="stat-value">{metrics?.avg_response_time || 0}m</div>
-                        <div className="stat-label">Avg Response Time</div>
+                        <div className="stat-label">Avg Response Time (All Time)</div>
                     </div>
                 </div>
             </div>
@@ -406,27 +406,27 @@ function Dashboard() {
                     <div className="stats-grid" style={{ marginBottom: 0 }}>
                         <div style={{ textAlign: 'center', padding: 'var(--space-md)' }}>
                             <div style={{ fontSize: '2rem', fontWeight: 700, color: 'var(--accent-danger)' }}>{metrics?.today?.total || 0}</div>
-                            <div className="text-muted">Faults Reported</div>
+                            <div className="text-muted">Reported Today</div>
                         </div>
                         <div style={{ textAlign: 'center', padding: 'var(--space-md)' }}>
                             <div style={{ fontSize: '2rem', fontWeight: 700, color: 'var(--accent-success)' }}>{metrics?.today?.resolved || 0}</div>
-                            <div className="text-muted">Faults Resolved</div>
+                            <div className="text-muted">Resolved Today</div>
                         </div>
                     </div>
                 </div>
 
                 <div className="card">
                     <div className="card-header">
-                        <h3 className="card-title">Technician Status</h3>
+                        <h3 className="card-title">Technician & Staff Status</h3>
                     </div>
                     <div className="stats-grid" style={{ marginBottom: 0 }}>
                         <div style={{ textAlign: 'center', padding: 'var(--space-md)' }}>
                             <div style={{ fontSize: '2rem', fontWeight: 700, color: 'var(--accent-success)' }}>{metrics?.technicians?.total || 0}</div>
-                            <div className="text-muted">Total</div>
+                            <div className="text-muted">Technicians</div>
                         </div>
-                        {/* Status tracking removed from Technicians for now */}
                         <div style={{ textAlign: 'center', padding: 'var(--space-md)' }}>
-                            <div className="text-muted"><small>Status tracking requires update</small></div>
+                            <div style={{ fontSize: '2rem', fontWeight: 700, color: '#4299E1' }}>{metrics?.staff_count || 0}</div>
+                            <div className="text-muted">Active Staff</div>
                         </div>
                     </div>
                 </div>
@@ -439,7 +439,7 @@ function Dashboard() {
                 <div className="stats-grid" style={{ marginBottom: 0 }}>
                     <div style={{ textAlign: 'center', padding: 'var(--space-md)' }}>
                         <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--accent-success)' }}>{metrics?.components?.active || 0}</div>
-                        <div className="text-muted">Active</div>
+                        <div className="text-muted">Active (Real-time)</div>
                     </div>
                     <div style={{ textAlign: 'center', padding: 'var(--space-md)' }}>
                         <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--accent-warning)' }}>{metrics?.components?.maintenance || 0}</div>
@@ -1989,6 +1989,68 @@ function QualityMetrics() {
                     </table>
                 </div>
             </div>
+
+            <div className="card mt-3">
+                <div className="card-header">
+                    <h3 className="card-title">Technician Performance</h3>
+                </div>
+                <div className="table-container" style={{ border: 'none' }}>
+                    <table className="table">
+                        <thead>
+                            <tr>
+                                <th>Technician</th>
+                                <th>Resolved Faults</th>
+                                <th>Resolution Score</th>
+                                <th>Avg Resolution Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {kpis?.technician_performance?.map((tech) => {
+                                const efficiency = tech.assigned_count > 0 ? (tech.resolved_count / tech.assigned_count) * 100 : 0;
+                                return (
+                                    <tr key={tech.user_id}>
+                                        <td style={{ fontWeight: 500 }}>{tech.name}</td>
+                                        <td>
+                                            <div className="d-flex align-center gap-2">
+                                                <span className="badge badge-success" style={{ fontSize: '0.9rem' }}>
+                                                    {tech.resolved_count}
+                                                </span>
+                                                <span className="text-muted" style={{ fontSize: '0.8rem' }}>/ {tech.assigned_count || 0} assigned</span>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <div style={{ width: '100%', maxWidth: '140px' }}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px', fontSize: '0.75rem' }}>
+                                                    <span>{Math.round(efficiency)}%</span>
+                                                </div>
+                                                <div style={{ height: '6px', width: '100%', background: '#E2E8F0', borderRadius: '3px', overflow: 'hidden' }}>
+                                                    <div style={{
+                                                        height: '100%',
+                                                        width: `${efficiency}%`,
+                                                        background: efficiency >= 75 ? 'var(--accent-success)' : efficiency >= 40 ? 'var(--accent-warning)' : 'var(--accent-danger)',
+                                                        transition: 'width 0.3s ease'
+                                                    }}></div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            {tech.avg_resolution_time
+                                                ? Math.round(tech.avg_resolution_time) + 'm'
+                                                : <span className="text-muted">-</span>
+                                            }
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                            {(!kpis?.technician_performance || kpis.technician_performance.length === 0) && (
+                                <tr>
+                                    <td colSpan="3" className="text-center text-muted">No resolution data for this period</td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     );
 }
@@ -2581,10 +2643,47 @@ function Technicians() {
                 <div className="loading-container"><div className="spinner"></div></div>
             ) : (
                 <>
+                    {/* Manager Section */}
+                    {technicians.filter(t => t.role === 'Manager').length > 0 && (
+                        <div style={{ marginBottom: '2rem' }}>
+                            <h3 style={{ marginBottom: '1rem', color: 'var(--primary)' }}>👨‍💼 Management</h3>
+                            <div className="stats-grid">
+                                {technicians.filter(t => t.role === 'Manager').map((tech) => (
+                                    <div key={tech.id} className="card" style={{ borderLeft: '4px solid var(--primary)' }}>
+                                        <div className="d-flex align-center gap-2 mb-2">
+                                            <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'linear-gradient(135deg, #2D3748 0%, #1A202C 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem', color: 'white' }}>
+                                                {tech.name[0]}
+                                            </div>
+                                            <div className="flex-1">
+                                                <div style={{ fontWeight: 600 }}>
+                                                    {tech.name}
+                                                    {Number(tech.id) === Number(user_id) &&
+                                                        <span className="badge badge-primary" style={{ fontSize: '0.7em', padding: '2px 6px', marginLeft: '6px' }}>You</span>
+                                                    }
+                                                </div>
+                                                <div className="text-muted" style={{ fontSize: '0.875rem' }}>Network Manager</div>
+                                            </div>
+                                        </div>
+                                        <div className="text-muted mb-2" style={{ fontSize: '0.875rem' }}>
+                                            <div>📧 {tech.email}</div>
+                                            {tech.phone && <div>📞 {tech.phone}</div>}
+                                        </div>
+                                        {/* Manager Actions (Self Edit Only) */}
+                                        {Number(tech.id) === Number(user_id) && (
+                                            <div className="d-flex gap-2 mt-auto">
+                                                <button className="btn btn-sm btn-secondary flex-1" onClick={() => { setEditingTech(tech); setShowModal(true); }}>Edit</button>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
                     {/* Active Technicians */}
-                    <h3 style={{ marginBottom: '1rem', color: 'var(--primary)' }}>👷 Team ({technicians.filter(t => t.status === 'Active' && t.role !== 'Staff').length})</h3>
+                    <h3 style={{ marginBottom: '1rem', color: 'var(--primary)' }}>👷 Technicians ({technicians.filter(t => t.status === 'Active' && t.role === 'Technician').length})</h3>
                     <div className="stats-grid">
-                        {technicians.filter(t => t.status === 'Active' && t.role !== 'Staff').map((tech) => (
+                        {technicians.filter(t => t.status === 'Active' && t.role === 'Technician').map((tech) => (
                             <div key={tech.id} className="card">
                                 <div className="d-flex align-center gap-2 mb-2">
                                     <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--gradient-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem' }}>
@@ -2609,41 +2708,110 @@ function Technicians() {
                                             const now = new Date();
                                             const diffMs = now - created;
                                             const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-                                            const diffMonths = Math.floor(diffDays / 30);
-                                            const diffYears = Math.floor(diffDays / 365);
-                                            if (diffYears >= 1) {
-                                                const remainingMonths = Math.floor((diffDays % 365) / 30);
-                                                return `${diffYears}y ${remainingMonths}m ago`;
-                                            } else if (diffMonths >= 1) {
-                                                return `${diffMonths} month${diffMonths > 1 ? 's' : ''} ago`;
-                                            } else if (diffDays >= 1) {
-                                                return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-                                            } else {
-                                                return 'Today';
-                                            }
+                                            if (diffDays > 365) return `${Math.floor(diffDays / 365)}y ${Math.floor((diffDays % 365) / 30)}m ago`;
+                                            if (diffDays > 30) return `${Math.floor(diffDays / 30)}m ago`;
+                                            return `${diffDays} days ago`;
                                         })()}</div>
                                     )}
                                 </div>
-                                <div className="d-flex align-center justify-between">
-                                    <span style={{ fontSize: '0.875rem' }}>
-                                        <strong>{tech.active_faults || 0}</strong> active faults
-                                    </span>
+                                <div style={{ fontSize: '0.875rem', marginBottom: '1rem' }}>
+                                    <strong>{tech.active_faults || 0}</strong> active faults
                                 </div>
-                                {(role === 'Admin' || role === 'Manager') && (
-                                    <div className="d-flex gap-2 mt-3" style={{ flexWrap: 'wrap' }}>
-                                        <button className="btn btn-secondary btn-sm" onClick={() => { setEditingTech(tech); setShowModal(true); }}>Edit</button>
-                                        <button className="btn btn-warning btn-sm" style={{ background: '#DDA15E', borderColor: '#DDA15E', color: 'white' }} onClick={() => setShowPasswordModal(tech)}>Pass</button>
-                                        <button className="btn btn-danger btn-sm" style={{ backgroundColor: '#DC3545', color: 'white' }} onClick={() => handleDeactivate(tech.id)}>Inactivate</button>
-                                    </div>
-                                )}
+                                <div className="d-flex gap-2 mt-auto">
+                                    <button className="btn btn-sm btn-secondary flex-1" onClick={() => { setEditingTech(tech); setShowModal(true); }}>Edit</button>
+                                    <button className="btn btn-sm btn-secondary flex-1" onClick={() => handleResetPassword(tech.id)}>Pass</button>
+                                    <button className="btn btn-sm btn-danger flex-1" onClick={() => handleStatusChange(tech.id, 'Inactive')}>Inactivate</button>
+                                </div>
                             </div>
                         ))}
-                        {technicians.filter(t => t.status === 'Active' && t.role !== 'Staff').length === 0 && (
-                            <div className="text-muted">No active team members</div>
-                        )}
                     </div>
 
-                    {/* Staff Section */}
+                    {/* Active Staff */}
+                    <h3 style={{ marginBottom: '1rem', marginTop: '2rem', color: 'var(--primary)' }}>🏢 Staff Members ({technicians.filter(t => t.status === 'Active' && t.role === 'Staff').length})</h3>
+                    <div className="stats-grid">
+                        {technicians.filter(t => t.status === 'Active' && t.role === 'Staff').map((staff) => (
+                            <div key={staff.id} className="card">
+                                <div className="d-flex align-center gap-2 mb-2">
+                                    <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'linear-gradient(135deg, #4299E1 0%, #2B6CB0 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem', color: 'white' }}>
+                                        {staff.name[0]}
+                                    </div>
+                                    <div className="flex-1">
+                                        <div style={{ fontWeight: 600 }}>
+                                            {staff.name}
+                                            {Number(staff.id) === Number(user_id) &&
+                                                <span className="badge badge-primary" style={{ fontSize: '0.7em', padding: '2px 6px', marginLeft: '6px' }}>You</span>
+                                            }
+                                        </div>
+                                        <div className="text-muted" style={{ fontSize: '0.875rem' }}>{staff.role}</div>
+                                    </div>
+                                </div>
+                                <div className="text-muted mb-2" style={{ fontSize: '0.875rem' }}>
+                                    <div>📧 {staff.email}</div>
+                                    {staff.phone && <div>📞 {staff.phone}</div>}
+                                    {staff.created_at && (
+                                        <div>📅 Joined: {(() => {
+                                            const created = new Date(staff.created_at);
+                                            const now = new Date();
+                                            const diffMs = now - created;
+                                            const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                                            if (diffDays > 365) return `${Math.floor(diffDays / 365)}y ${Math.floor((diffDays % 365) / 30)}m ago`;
+                                            if (diffDays > 30) return `${Math.floor(diffDays / 30)}m ago`;
+                                            return `${diffDays} days ago`;
+                                        })()}</div>
+                                    )}
+                                </div>
+                                <div className="d-flex gap-2 mt-auto">
+                                    <button className="btn btn-sm btn-secondary flex-1" onClick={() => { setEditingTech(staff); setShowModal(true); }}>Edit</button>
+                                    <button className="btn btn-sm btn-secondary flex-1" onClick={() => handleResetPassword(staff.id)}>Pass</button>
+                                    <button className="btn btn-sm btn-danger flex-1" onClick={() => handleStatusChange(staff.id, 'Inactive')}>Inactivate</button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="text-muted mb-2" style={{ fontSize: '0.875rem' }}>
+                        <div>📧 {tech.email}</div>
+                        {tech.phone && <div>📞 {tech.phone}</div>}
+                        {tech.created_at && (
+                            <div>📅 Joined: {(() => {
+                                const created = new Date(tech.created_at);
+                                const now = new Date();
+                                const diffMs = now - created;
+                                const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                                const diffMonths = Math.floor(diffDays / 30);
+                                const diffYears = Math.floor(diffDays / 365);
+                                if (diffYears >= 1) {
+                                    const remainingMonths = Math.floor((diffDays % 365) / 30);
+                                    return `${diffYears}y ${remainingMonths}m ago`;
+                                } else if (diffMonths >= 1) {
+                                    return `${diffMonths} month${diffMonths > 1 ? 's' : ''} ago`;
+                                } else if (diffDays >= 1) {
+                                    return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+                                } else {
+                                    return 'Today';
+                                }
+                            })()}</div>
+                        )}
+                    </div>
+                    <div className="d-flex align-center justify-between">
+                        <span style={{ fontSize: '0.875rem' }}>
+                            <strong>{tech.active_faults || 0}</strong> active faults
+                        </span>
+                    </div>
+                    {(role === 'Admin' || role === 'Manager') && (
+                        <div className="d-flex gap-2 mt-3" style={{ flexWrap: 'wrap' }}>
+                            <button className="btn btn-secondary btn-sm" onClick={() => { setEditingTech(tech); setShowModal(true); }}>Edit</button>
+                            <button className="btn btn-warning btn-sm" style={{ background: '#DDA15E', borderColor: '#DDA15E', color: 'white' }} onClick={() => setShowPasswordModal(tech)}>Pass</button>
+                            <button className="btn btn-danger btn-sm" style={{ backgroundColor: '#DC3545', color: 'white' }} onClick={() => handleDeactivate(tech.id)}>Inactivate</button>
+                        </div>
+                    )}
+                </div>
+                        ))}
+            {technicians.filter(t => t.status === 'Active' && t.role !== 'Staff').length === 0 && (
+                <div className="text-muted">No active team members</div>
+            )}
+        </div>
+
+                    {/* Staff Section */ }
                     <h3 style={{ marginTop: '2rem', marginBottom: '1rem', color: '#4299E1' }}>🏢 Staff ({technicians.filter(t => t.status === 'Active' && t.role === 'Staff').length})</h3>
                     <div className="stats-grid">
                         {technicians.filter(t => t.status === 'Active' && t.role === 'Staff').map((tech) => (
@@ -2688,79 +2856,88 @@ function Technicians() {
                         )}
                     </div>
 
-                    {/* Inactive Technicians */}
-                    {technicians.filter(t => t.status === 'Inactive').length > 0 && (
-                        <>
-                            <h3 style={{ marginTop: '2rem', marginBottom: '1rem', color: '#888' }}>Inactive Technicians ({technicians.filter(t => t.status === 'Inactive').length})</h3>
-                            <div className="stats-grid">
-                                {technicians.filter(t => t.status === 'Inactive').map((tech) => (
-                                    <div key={tech.id} className="card" style={{ opacity: 0.5, filter: 'grayscale(50%)' }}>
-                                        <div className="d-flex align-center gap-2 mb-2">
-                                            <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#888', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem', color: 'white' }}>
-                                                {tech.name[0]}
-                                            </div>
-                                            <div className="flex-1">
-                                                <div style={{ fontWeight: 600 }}>{tech.name}</div>
-                                                <div className="text-muted" style={{ fontSize: '0.875rem' }}>{tech.role} <span style={{ color: '#DC3545' }}>(Inactive)</span></div>
-                                            </div>
-                                        </div>
-                                        <div className="text-muted mb-2" style={{ fontSize: '0.875rem' }}>
-                                            <div>📧 {tech.email}</div>
-                                            {tech.phone && <div>📞 {tech.phone}</div>}
-                                        </div>
-                                        <div className="d-flex gap-2 mt-3" style={{ flexWrap: 'wrap' }}>
-                                            <button className="btn btn-primary btn-sm" onClick={() => handleStatusChange(tech.id, 'Active')}>Reactivate</button>
-                                            <button className="btn btn-danger btn-sm" style={{ backgroundColor: '#DC3545', color: 'white' }} onClick={() => setConfirmDelete(tech)}>Delete</button>
-                                        </div>
-                                    </div>
-                                ))}
+    {/* Inactive Technicians */ }
+    {
+        technicians.filter(t => t.status === 'Inactive').length > 0 && (
+            <>
+                <h3 style={{ marginTop: '2rem', marginBottom: '1rem', color: '#888' }}>Inactive Technicians ({technicians.filter(t => t.status === 'Inactive').length})</h3>
+                <div className="stats-grid">
+                    {technicians.filter(t => t.status === 'Inactive').map((tech) => (
+                        <div key={tech.id} className="card" style={{ opacity: 0.5, filter: 'grayscale(50%)' }}>
+                            <div className="d-flex align-center gap-2 mb-2">
+                                <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#888', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem', color: 'white' }}>
+                                    {tech.name[0]}
+                                </div>
+                                <div className="flex-1">
+                                    <div style={{ fontWeight: 600 }}>{tech.name}</div>
+                                    <div className="text-muted" style={{ fontSize: '0.875rem' }}>{tech.role} <span style={{ color: '#DC3545' }}>(Inactive)</span></div>
+                                </div>
                             </div>
-                        </>
-                    )}
-                </>
-            )}
-
-            {showModal && (
-                <TechnicianModal
-                    technician={editingTech}
-                    onClose={() => { setShowModal(false); setEditingTech(null); }}
-                    onSave={handleSave}
-                />
-            )}
-
-            {showPasswordModal && (
-                <PasswordResetModal
-                    technician={showPasswordModal}
-                    onClose={() => setShowPasswordModal(null)}
-                />
-            )}
-
-            {/* Custom Confirmation Modal */}
-            {confirmDelete && (
-                <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
-                    <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400 }}>
-                        <div className="modal-header">
-                            <h3 className="modal-title" style={{ color: '#DC3545', display: 'flex', alignItems: 'center' }}>
-                                <AlertTriangle size={24} style={{ marginRight: '8px' }} /> Confirm Deletion
-                            </h3>
-                            <button className="modal-close" onClick={() => setConfirmDelete(null)}>&times;</button>
+                            <div className="text-muted mb-2" style={{ fontSize: '0.875rem' }}>
+                                <div>📧 {tech.email}</div>
+                                {tech.phone && <div>📞 {tech.phone}</div>}
+                            </div>
+                            <div className="d-flex gap-2 mt-3" style={{ flexWrap: 'wrap' }}>
+                                <button className="btn btn-primary btn-sm" onClick={() => handleStatusChange(tech.id, 'Active')}>Reactivate</button>
+                                <button className="btn btn-danger btn-sm" style={{ backgroundColor: '#DC3545', color: 'white' }} onClick={() => setConfirmDelete(tech)}>Delete</button>
+                            </div>
                         </div>
-                        <div className="modal-body">
-                            <p style={{ marginBottom: '1rem' }}>
-                                Are you sure you want to <strong>permanently delete</strong> <strong>{confirmDelete.name}</strong>?
-                            </p>
-                            <p style={{ color: '#DC3545', fontSize: '0.875rem' }}>
-                                This action cannot be undone. All their data will be permanently removed.
-                            </p>
-                        </div>
-                        <div className="modal-footer">
-                            <button className="btn btn-secondary" onClick={() => setConfirmDelete(null)}>Cancel</button>
-                            <button className="btn btn-danger" style={{ backgroundColor: '#DC3545', color: 'white' }} onClick={() => handleDelete(confirmDelete.id)}>Delete Permanently</button>
-                        </div>
-                    </div>
+                    ))}
                 </div>
-            )}
+            </>
+        )
+    }
+                </>
+            )
+}
+
+{
+    showModal && (
+        <TechnicianModal
+            technician={editingTech}
+            onClose={() => { setShowModal(false); setEditingTech(null); }}
+            onSave={handleSave}
+        />
+    )
+}
+
+{
+    showPasswordModal && (
+        <PasswordResetModal
+            technician={showPasswordModal}
+            onClose={() => setShowPasswordModal(null)}
+        />
+    )
+}
+
+{/* Custom Confirmation Modal */ }
+{
+    confirmDelete && (
+        <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400 }}>
+                <div className="modal-header">
+                    <h3 className="modal-title" style={{ color: '#DC3545', display: 'flex', alignItems: 'center' }}>
+                        <AlertTriangle size={24} style={{ marginRight: '8px' }} /> Confirm Deletion
+                    </h3>
+                    <button className="modal-close" onClick={() => setConfirmDelete(null)}>&times;</button>
+                </div>
+                <div className="modal-body">
+                    <p style={{ marginBottom: '1rem' }}>
+                        Are you sure you want to <strong>permanently delete</strong> <strong>{confirmDelete.name}</strong>?
+                    </p>
+                    <p style={{ color: '#DC3545', fontSize: '0.875rem' }}>
+                        This action cannot be undone. All their data will be permanently removed.
+                    </p>
+                </div>
+                <div className="modal-footer">
+                    <button className="btn btn-secondary" onClick={() => setConfirmDelete(null)}>Cancel</button>
+                    <button className="btn btn-danger" style={{ backgroundColor: '#DC3545', color: 'white' }} onClick={() => handleDelete(confirmDelete.id)}>Delete Permanently</button>
+                </div>
+            </div>
         </div>
+    )
+}
+        </div >
     );
 }
 
@@ -3594,6 +3771,7 @@ function Inventory() {
     const [stats, setStats] = useState({ total_items: 0, total_stock: 0, total_value: 0, low_stock_count: 0 });
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
+    const [showUseModal, setShowUseModal] = useState(false);
     const [editItem, setEditItem] = useState(null);
     const [filter, setFilter] = useState('');
 
@@ -3642,6 +3820,21 @@ function Inventory() {
         if (!window.confirm('Delete this item?')) return;
         try {
             await fetchAPI(`/inventory/${id}`, { method: 'DELETE' });
+            loadInventory();
+            loadStats();
+        } catch (error) {
+            alert(error.message);
+        }
+    };
+
+    const handleUseItem = async (form) => {
+        try {
+            await fetchAPI(`/inventory/${editItem.item_id}/use`, {
+                method: 'POST',
+                body: JSON.stringify(form)
+            });
+            setShowUseModal(false);
+            setEditItem(null);
             loadInventory();
             loadStats();
         } catch (error) {
@@ -3703,13 +3896,15 @@ function Inventory() {
                         <div className="stat-label">Low Stock Items</div>
                     </div>
                 </div>
-                <div className="stat-card">
-                    <div className="stat-icon warning"><Coins size={24} color="white" /></div>
-                    <div className="stat-content">
-                        <div className="stat-value">Ksh {stats.total_value.toLocaleString()}</div>
-                        <div className="stat-label">Total Value</div>
+                {user?.role !== 'Technician' && (
+                    <div className="stat-card">
+                        <div className="stat-icon warning"><Coins size={24} color="white" /></div>
+                        <div className="stat-content">
+                            <div className="stat-value">Ksh {stats.total_value.toLocaleString()}</div>
+                            <div className="stat-label">Total Value</div>
+                        </div>
                     </div>
-                </div>
+                )}
             </div>
 
             <div className="action-bar">
@@ -3741,7 +3936,7 @@ function Inventory() {
                                 <th>Type</th>
                                 <th>Stock</th>
                                 <th>Min Level</th>
-                                <th>Unit Cost</th>
+                                {user?.role !== 'Technician' && <th>Unit Cost</th>}
                                 <th>Location</th>
                                 <th>Actions</th>
                             </tr>
@@ -3754,11 +3949,16 @@ function Inventory() {
                                     <td><span className="badge">{item.category}</span></td>
                                     <td style={{ color: item.low_stock ? '#ED8936' : 'inherit', fontWeight: item.low_stock ? 'bold' : 'normal' }}>{item.quantity}</td>
                                     <td>{item.min_level}</td>
-                                    <td>Ksh {parseFloat(item.unit_cost).toLocaleString()}</td>
+                                    {user?.role !== 'Technician' && <td>Ksh {parseFloat(item.unit_cost).toLocaleString()}</td>}
                                     <td>{item.location || '-'}</td>
                                     <td>
                                         <div className="d-flex gap-1">
-                                            <button className="btn btn-secondary btn-sm" onClick={() => { setEditItem(item); setShowModal(true); }}>Edit</button>
+                                            {user?.role === 'Technician' && (
+                                                <button className="btn btn-primary btn-sm" onClick={() => { setEditItem(item); setShowUseModal(true); }}>Use</button>
+                                            )}
+                                            {user?.role !== 'Technician' && (
+                                                <button className="btn btn-secondary btn-sm" onClick={() => { setEditItem(item); setShowModal(true); }}>Edit</button>
+                                            )}
                                             {user?.role === 'Admin' && (
                                                 <button className="btn btn-danger btn-sm" onClick={() => handleDelete(item.item_id)}>Delete</button>
                                             )}
@@ -3780,6 +3980,14 @@ function Inventory() {
                     categories={categories}
                     onClose={() => { setShowModal(false); setEditItem(null); }}
                     onSave={handleSave}
+                />
+            )}
+
+            {showUseModal && (
+                <UseInventoryModal
+                    item={editItem}
+                    onClose={() => { setShowUseModal(false); setEditItem(null); }}
+                    onUse={handleUseItem}
                 />
             )}
         </div>
@@ -4115,6 +4323,64 @@ function TeamDirectory() {
                     <UserTable users={staff} title="Staff Members" />
                 </div>
             )}
+        </div>
+    );
+}
+
+function UseInventoryModal({ item, onClose, onUse }) {
+    const [form, setForm] = useState({
+        quantity: 1,
+        reason: ''
+    });
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        onUse(form);
+    };
+
+    return (
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-header">
+                    <h3 className="modal-title">Use Inventory Item</h3>
+                    <button className="modal-close" onClick={onClose}>&times;</button>
+                </div>
+                <form onSubmit={handleSubmit}>
+                    <div className="modal-body">
+                        <p style={{ marginBottom: '1rem' }}>
+                            Record usage for <strong>{item?.name}</strong>. This will be deducted from stock.
+                        </p>
+                        <div className="form-group">
+                            <label className="form-label">Quantity Used *</label>
+                            <input
+                                type="number"
+                                min="1"
+                                max={item?.quantity}
+                                className="form-input"
+                                value={form.quantity}
+                                onChange={(e) => setForm({ ...form, quantity: parseInt(e.target.value) || 1 })}
+                                required
+                            />
+                            <small className="text-muted">Current Stock: {item?.quantity}</small>
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">Reason / Reference *</label>
+                            <textarea
+                                className="form-input"
+                                value={form.reason}
+                                onChange={(e) => setForm({ ...form, reason: e.target.value })}
+                                placeholder="e.g. Used for Fault FLT-123 repairs"
+                                required
+                                rows="3"
+                            ></textarea>
+                        </div>
+                    </div>
+                    <div className="modal-footer">
+                        <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+                        <button type="submit" className="btn btn-primary">Confirm Usage</button>
+                    </div>
+                </form>
+            </div>
         </div>
     );
 }
