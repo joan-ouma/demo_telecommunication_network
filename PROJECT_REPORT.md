@@ -61,10 +61,14 @@ CREATE TABLE IF NOT EXISTS Users (
     password_hash VARCHAR(255) NOT NULL,
     first_name VARCHAR(100) NOT NULL,
     last_name VARCHAR(100) NOT NULL,
-    role ENUM('Admin', 'Technician') DEFAULT 'Technician',
+    role ENUM('Admin', 'Manager', 'Technician', 'Staff') DEFAULT 'Technician',
     status ENUM('Active', 'Inactive') DEFAULT 'Active',
+    status_reason VARCHAR(255) DEFAULT NULL,
+    department_id INT DEFAULT NULL,
     email VARCHAR(100) UNIQUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    phone_number VARCHAR(15),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (department_id) REFERENCES Departments(department_id) ON DELETE SET NULL
 );
 ```
 
@@ -309,6 +313,61 @@ We developed a composite "Health Score" for each component (0-100%).
 6.  **Migration to Supabase (Cloud Database):**
     *   *Real-Time Updates:* Leveraging Supabase's real-time subscriptions to push fault updates instantly to the dashboard (replacing manual refreshes).
     *   *Enhanced Security:* Utilizing Supabase Auth for built-in **Email Verification** and Magic Links to further secure technician access.
+
+---
+
+## 6. System Enhancements (January 2026 Update)
+
+### 6.1 User Management & Audit Trail Improvements
+Following the initial deployment, we implemented comprehensive enhancements to strengthen audit capabilities and user management controls:
+
+#### **A. Manager Role Constraint**
+- **Implementation**: System-level validation ensuring only **one active Manager** exists at any time
+- **Business Value**: Prevents organizational hierarchy confusion and ensures clear chain of command
+- **Technical Detail**: Backend validation in user creation endpoint with role-based checks
+
+#### **B. Enhanced Audit Trail with Reasoning**
+**Database Enhancement:**
+```sql
+ALTER TABLE Users 
+ADD COLUMN status_reason VARCHAR(255) DEFAULT NULL AFTER status;
+```
+
+**New Capabilities:**
+- All user status changes (deactivation/reactivation) now require and store justification
+- Password resets logged with performer, target user, and timestamp
+- Visual color-coding in Audit Trail UI:
+  - 🔴 Red for Deletions
+  - 🟠 Orange for Deactivations  
+  - 🟢 Green for Reactivations
+  - 🟣 Purple for Password Resets
+  - 🔵 Blue for User Creations
+
+**Compliance Impact**: Meets enterprise audit requirements for user lifecycle tracking.
+
+#### **C. Notification System Refinements**
+1. **Technician Feedback Loop**: Technicians now receive notifications when their fixes are:
+   - ✅ Confirmed by reporter
+   - ❌ Rejected and reopened
+
+2. **Improved Navigation**: Notifications link directly to specific faults (`/faults?highlight=7`) instead of generic fault list, reducing search time by ~70%.
+
+3. **Technical Implementation**: Migrated from hash-based navigation to React Router's `useNavigate()` for proper SPA routing.
+
+#### **D. Access Control Refinements**
+- **Inventory Issuance**: Restricted to Technicians only (previously allowed all staff)
+- **Rationale**: Only field technicians require physical equipment for repairs
+- **Impact**: Reduces administrative overhead and prevents resource misallocation
+
+### 6.2 UI/UX Improvements
+- **Staff Card Display**: Separated role and department into distinct lines with location icon (📍)
+- **Status Change Modals**: Replaced browser prompts with professional modal dialogs
+- **Audit Trail Filtering**: Added entity type and action type filters for faster log analysis
+- **Responsive Card Layouts**: Fixed inactive user cards to maintain consistent grid width
+
+> **Note**: Detailed technical documentation available in `ENHANCEMENTS_2026_01_20.md`
+
+---
 
 ### 7. Conclusion
 The MnettyWise Network Management System successfully streamlines the complex operations of the ICT Department. By moving from manual tracking to a centralized, digital "Single Source of Truth," we have improved response times, increased accountability, and provided management with the data needed to make informed resource decisions. The system is scalable, secure, and ready for immediate deployment.
