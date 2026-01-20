@@ -20,7 +20,7 @@ router.get('/', authenticateToken, async (req, res) => {
       SELECT user_id as id, CONCAT(first_name, ' ', last_name) as name, email, phone_number as phone, role, created_at, status,
              (SELECT COUNT(*) FROM Faults f WHERE f.assigned_to = u.user_id AND f.status IN ('Open', 'In Progress')) as active_faults
       FROM Users u
-      WHERE u.role IN ('Technician', 'Staff')
+      WHERE u.role IN ('Technician', 'Staff', 'Manager')
     `;
         const params = [];
 

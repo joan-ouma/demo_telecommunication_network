@@ -19,6 +19,16 @@ FLUSH PRIVILEGES;
 -- 3. Table Definitions
 -- -------------------------------------------------------
 
+-- Departments
+DROP TABLE IF EXISTS `Departments`;
+CREATE TABLE `Departments` (
+  `department_id` int(11) NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) NOT NULL,
+  `location` varchar(100) DEFAULT NULL,
+  PRIMARY KEY (`department_id`),
+  UNIQUE KEY `name` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Users
 DROP TABLE IF EXISTS `Users`;
 CREATE TABLE `Users` (
@@ -29,12 +39,14 @@ CREATE TABLE `Users` (
   `last_name` varchar(100) NOT NULL,
   `role` enum('Admin','Manager','Technician','Staff') DEFAULT 'Technician',
   `status` enum('Active','Inactive') DEFAULT 'Active',
+  `department_id` int(11) DEFAULT NULL,
   `phone_number` varchar(15) DEFAULT NULL,
   `email` varchar(100) DEFAULT NULL,
   `created_at` timestamp NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`user_id`),
   UNIQUE KEY `username` (`username`),
-  UNIQUE KEY `email` (`email`)
+  UNIQUE KEY `email` (`email`),
+  CONSTRAINT `users_fk_dept` FOREIGN KEY (`department_id`) REFERENCES `Departments` (`department_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Network Components
@@ -43,6 +55,7 @@ CREATE TABLE `Network_Components` (
   `component_id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(100) NOT NULL,
   `type` enum('Router','Switch','Cable','Server','Antenna','Firewall','Access Point') NOT NULL,
+  `department_id` int(11) DEFAULT NULL,
   `model_number` varchar(100) DEFAULT NULL,
   `ip_address` varchar(45) DEFAULT NULL,
   `mac_address` varchar(17) DEFAULT NULL,
@@ -54,7 +67,8 @@ CREATE TABLE `Network_Components` (
   `install_date` date DEFAULT NULL,
   `created_at` timestamp NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-  PRIMARY KEY (`component_id`)
+  PRIMARY KEY (`component_id`),
+  CONSTRAINT `comp_fk_dept` FOREIGN KEY (`department_id`) REFERENCES `Departments` (`department_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Inventory Items (New)
@@ -210,3 +224,18 @@ CREATE TABLE `Notifications` (
   KEY `user_id` (`user_id`),
   CONSTRAINT `notif_fk_user` FOREIGN KEY (`user_id`) REFERENCES `Users` (`user_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 4. Initial Data Seeding
+-- -------------------------------------------------------
+
+-- Departments
+INSERT INTO `Departments` (`name`, `location`) VALUES
+('Network Operations', 'HQ Floor 2'),
+('Data Center A', 'Building 1'),
+('Data Center B', 'Building 2'),
+('Field Operations', 'HQ Floor 1'),
+('Customer Support', 'HQ Floor 3'),
+('Warehouse', 'Logistics Center'),
+('HR', 'HQ Floor 4'),
+('Finance', 'HQ Floor 4'),
+('IT Support', 'HQ Floor 2');

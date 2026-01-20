@@ -530,7 +530,8 @@ body {
 /* Status Badges */
 .status-active,
 .status-available,
-.status-resolved {
+.status-resolved,
+.status-success {
   background: rgba(16, 185, 129, 0.2);
   color: var(--accent-success);
 }
@@ -544,13 +545,16 @@ body {
 
 .status-maintenance,
 .status-busy,
-.status-in_progress {
+.status-in_progress,
+.status-pending {
   background: rgba(245, 158, 11, 0.2);
   color: var(--accent-warning);
 }
 
 .status-faulty,
-.status-open {
+.status-open,
+.status-failure,
+.status-failed {
   background: rgba(239, 68, 68, 0.2);
   color: var(--accent-danger);
 }

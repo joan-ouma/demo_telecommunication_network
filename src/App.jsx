@@ -166,13 +166,14 @@ function Sidebar({ user, onLogout, isOpen, onClose }) {
     const navItems = [
         { path: '/', icon: <LayoutDashboard size={20} />, label: 'Dashboard', roles: ['Admin', 'Manager', 'Technician'] },
         { path: '/infrastructure', icon: <Server size={20} />, label: 'Infrastructure', roles: ['Admin', 'Manager', 'Technician'] },
-        { path: '/map', icon: <MapPin size={20} />, label: 'Device Map', roles: ['Admin', 'Manager', 'Technician', 'Staff'] },
+        { path: '/map', icon: <MapPin size={20} />, label: 'Device Map', roles: ['Admin', 'Manager', 'Technician'] },
         { path: '/faults', icon: <AlertTriangle size={20} />, label: 'Fault Reporting', roles: ['Admin', 'Manager', 'Technician', 'Staff'] },
         { path: '/metrics', icon: <BarChart size={20} />, label: 'Quality Metrics', roles: ['Admin', 'Manager', 'Technician'] },
-        { path: '/reports', icon: <ClipboardList size={20} />, label: 'Incident Reports', roles: ['Admin', 'Manager', 'Technician'] },
+        { path: '/reports', icon: <ClipboardList size={20} />, label: 'Incident Reports', roles: ['Admin', 'Manager'] },
         { path: '/maintenance', icon: <Wrench size={20} />, label: 'Maintenance Logs', roles: ['Admin', 'Manager', 'Technician'] },
         { path: '/inventory', icon: <Package size={20} />, label: 'Inventory', roles: ['Admin', 'Manager', 'Technician'] },
-        { path: '/technicians', icon: <Users size={20} />, label: 'Team Management', roles: ['Admin', 'Manager', 'Technician'] },
+        { path: '/technicians', icon: <Users size={20} />, label: 'Team Management', roles: ['Admin', 'Manager'] },
+        { path: '/team', icon: <Users size={20} />, label: 'Team', roles: ['Technician', 'Staff'] },
         { path: '/audit', icon: <Shield size={20} />, label: 'Audit Trail', roles: ['Admin'] },
     ];
 
@@ -720,6 +721,7 @@ function Infrastructure() {
 }
 
 function ComponentModal({ component, onClose, onSave }) {
+    const [departments, setDepartments] = useState([]);
     const [form, setForm] = useState({
         name: component?.name || '',
         type: component?.type || 'Router',
@@ -727,6 +729,7 @@ function ComponentModal({ component, onClose, onSave }) {
         ip_address: component?.ip_address || '',
         mac_address: component?.mac_address || '',
         location: component?.location || '',
+        department_id: component?.department_id || '',
         status: component?.status || 'Active',
         config_details: component?.config_details || '',
         latitude: component?.latitude || '',
@@ -734,9 +737,21 @@ function ComponentModal({ component, onClose, onSave }) {
         install_date: component?.install_date ? component.install_date.split('T')[0] : '',
     });
 
+    useEffect(() => {
+        fetchAPI('/departments').then(res => setDepartments(res.data));
+    }, []);
+
     const handleSubmit = (e) => {
         e.preventDefault();
-        onSave(form);
+        // If location is empty but department is selected, use department name + location as default
+        let finalLocation = form.location;
+        if (!finalLocation && form.department_id) {
+            const dept = departments.find(d => String(d.department_id) === String(form.department_id));
+            if (dept) {
+                finalLocation = dept.name; // Simple valid location string
+            }
+        }
+        onSave({ ...form, location: finalLocation });
     };
 
     return (
@@ -786,6 +801,39 @@ function ComponentModal({ component, onClose, onSave }) {
                         </div>
                         <div className="grid-2">
                             <div className="form-group">
+                                <label className="form-label">Department *</label>
+                                <select
+                                    className="form-select"
+                                    value={form.department_id}
+                                    onChange={(e) => {
+                                        const deptId = e.target.value;
+                                        const dept = departments.find(d => String(d.department_id) === String(deptId));
+                                        setForm({
+                                            ...form,
+                                            department_id: deptId,
+                                            location: dept ? dept.location || dept.name : form.location // Auto-fill location detail
+                                        });
+                                    }}
+                                    required
+                                >
+                                    <option value="">Select Department</option>
+                                    {departments.map(d => (
+                                        <option key={d.department_id} value={d.department_id}>{d.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="form-group">
+                                <label className="form-label">Location Detail</label>
+                                <input
+                                    className="form-input"
+                                    value={form.location}
+                                    onChange={(e) => setForm({ ...form, location: e.target.value })}
+                                    placeholder="Specific room or rack"
+                                />
+                            </div>
+                        </div>
+                        <div className="grid-2">
+                            <div className="form-group">
                                 <label className="form-label">IP Address</label>
                                 <input className="form-input" value={form.ip_address} onChange={(e) => setForm({ ...form, ip_address: e.target.value })} placeholder="192.168.1.1" />
                             </div>
@@ -793,10 +841,6 @@ function ComponentModal({ component, onClose, onSave }) {
                                 <label className="form-label">MAC Address</label>
                                 <input className="form-input" value={form.mac_address} onChange={(e) => setForm({ ...form, mac_address: e.target.value })} />
                             </div>
-                        </div>
-                        <div className="form-group">
-                            <label className="form-label">Location</label>
-                            <input className="form-input" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="Data Center A - Rack 1" />
                         </div>
                         <div className="grid-2">
                             <div className="form-group">
@@ -809,8 +853,14 @@ function ComponentModal({ component, onClose, onSave }) {
                             </div>
                         </div>
                         <div className="form-group">
-                            <label className="form-label">Config Details (JSON)</label>
-                            <textarea className="form-textarea" value={form.config_details} onChange={(e) => setForm({ ...form, config_details: e.target.value })} rows="3"></textarea>
+                            <label className="form-label">Config/Additional Notes</label>
+                            <textarea
+                                className="form-textarea"
+                                value={form.config_details}
+                                onChange={(e) => setForm({ ...form, config_details: e.target.value })}
+                                placeholder="Enter configuration details or notes (plain text)"
+                                rows={3}
+                            />
                         </div>
                     </div>
                     <div className="modal-footer">
@@ -840,10 +890,13 @@ function StaffFaultReport() {
     const [myReports, setMyReports] = useState([]);
     const [showForm, setShowForm] = useState(true);
     const [components, setComponents] = useState([]);
+    const [departments, setDepartments] = useState([]);
+    const [filteredComponents, setFilteredComponents] = useState([]);
     const [form, setForm] = useState({
         title: '',
         description: '',
         priority: 'Medium',
+        department_id: '',
         component_id: '',
         location_description: '',
         latitude: null,
@@ -852,13 +905,32 @@ function StaffFaultReport() {
 
     useEffect(() => {
         loadComponents();
+        loadDepartments();
         loadMyReports();
     }, []);
+
+    useEffect(() => {
+        if (form.department_id) {
+            setFilteredComponents(components.filter(c => String(c.department_id) === String(form.department_id)));
+        } else {
+            setFilteredComponents(components);
+        }
+    }, [form.department_id, components]);
+
+    const loadDepartments = async () => {
+        try {
+            const response = await fetchAPI('/departments');
+            setDepartments(response.data);
+        } catch (error) {
+            console.error('Failed to load departments:', error);
+        }
+    };
 
     const loadComponents = async () => {
         try {
             const response = await fetchAPI('/components');
             setComponents(response.data);
+            setFilteredComponents(response.data);
         } catch (error) {
             console.error('Failed to load components:', error);
         }
@@ -890,7 +962,7 @@ function StaffFaultReport() {
                 })
             });
             setSubmitted(true);
-            setForm({ title: '', description: '', priority: 'Medium', component_id: '', location_description: '', latitude: null, longitude: null });
+            setForm({ title: '', description: '', priority: 'Medium', department_id: '', component_id: '', location_description: '', latitude: null, longitude: null });
             loadMyReports();
             setTimeout(() => setSubmitted(false), 3000);
         } catch (error) {
@@ -992,6 +1064,30 @@ function StaffFaultReport() {
 
                         <div className="grid-2" style={{ marginBottom: '1.5rem' }}>
                             <div className="form-group">
+                                <label className="form-label" style={{ fontWeight: 600 }}>Department *</label>
+                                <select
+                                    className="form-input"
+                                    value={form.department_id}
+                                    onChange={(e) => {
+                                        const deptId = e.target.value;
+                                        const dept = departments.find(d => String(d.department_id) === String(deptId));
+                                        setForm({
+                                            ...form,
+                                            department_id: deptId,
+                                            location_description: dept ? dept.location || dept.name : form.location_description
+                                        });
+                                    }}
+                                    style={{ padding: '0.875rem' }}
+                                >
+                                    <option value="">-- Select your department --</option>
+                                    {departments.map(d => (
+                                        <option key={d.department_id} value={d.department_id}>
+                                            {d.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="form-group">
                                 <label className="form-label" style={{ fontWeight: 600 }}>Affected Equipment *</label>
                                 <select
                                     className="form-input"
@@ -1001,14 +1097,16 @@ function StaffFaultReport() {
                                     required
                                 >
                                     <option value="">-- Select equipment --</option>
-                                    {components.map(c => (
+                                    {filteredComponents.map(c => (
                                         <option key={c.component_id} value={c.component_id}>
-                                            {c.name} ({c.type}) - {c.location}
+                                            {c.name} ({c.type}) {c.department_name ? `- ${c.department_name}` : ''}
                                         </option>
                                     ))}
                                 </select>
                             </div>
+                        </div>
 
+                        <div className="grid-2" style={{ marginBottom: '1.5rem' }}>
                             <div className="form-group">
                                 <label className="form-label" style={{ fontWeight: 600 }}>How urgent is this?</label>
                                 <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -1030,17 +1128,16 @@ function StaffFaultReport() {
                                     ))}
                                 </div>
                             </div>
-                        </div>
-
-                        <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                            <label className="form-label" style={{ fontWeight: 600 }}>Your Location (helps technician find you)</label>
-                            <input
-                                className="form-input"
-                                placeholder="e.g., Building A, 3rd Floor, Office 305 near the coffee machine"
-                                value={form.location_description}
-                                onChange={(e) => setForm({ ...form, location_description: e.target.value })}
-                                style={{ padding: '0.875rem' }}
-                            />
+                            <div className="form-group">
+                                <label className="form-label" style={{ fontWeight: 600 }}>Your Location (helps technician find you)</label>
+                                <input
+                                    className="form-input"
+                                    placeholder="e.g., Building A, 3rd Floor, Office 305"
+                                    value={form.location_description}
+                                    onChange={(e) => setForm({ ...form, location_description: e.target.value })}
+                                    style={{ padding: '0.875rem' }}
+                                />
+                            </div>
                         </div>
 
                         <div className="grid-2" style={{ marginBottom: '1.5rem' }}>
@@ -1198,9 +1295,9 @@ function FaultReporting() {
 
     const handleExport = () => {
         const csv = [
-            ['ID', 'Title', 'Component', 'Priority', 'Status', 'Assigned', 'Reported'],
+            ['ID', 'Title', 'Department', 'Component', 'Priority', 'Status', 'Assigned', 'Reported'],
             ...faults.map(f => [
-                f.fault_id, f.title, f.component_name, f.priority, f.status,
+                f.fault_id, f.title, f.department_name || 'N/A', f.component_name, f.priority, f.status,
                 f.technician_name || 'Unassigned', f.reported_at
             ])
         ].map(e => e.join(',')).join('\n');
@@ -1327,8 +1424,8 @@ function FaultReporting() {
                         <thead>
                             <tr>
                                 <th>ID</th>
-                                <th>Title</th>
-                                <th>Component</th>
+                                <th>Title / Component</th>
+                                <th>Department</th>
                                 <th>Priority</th>
                                 <th>Status</th>
                                 <th>Assigned To</th>
@@ -1341,13 +1438,16 @@ function FaultReporting() {
                             {faults.map((fault) => (
                                 <tr key={fault.fault_id} style={fault.assigned_to === user_id ? { backgroundColor: 'rgba(96, 108, 56, 0.15)' } : {}}>
                                     <td style={{ fontWeight: 500 }}>FLT-{String(fault.fault_id).padStart(3, '0')}</td>
-                                    <td style={{ fontWeight: 500 }}>{fault.title}</td>
-                                    <td className="text-secondary">{fault.component_name || '-'}</td>
-                                    <td><span className={`badge priority-${fault.priority}`}>{fault.priority}</span></td>
-                                    <td><span className={`badge status-${fault.status.replace(' ', '-')}`}>{fault.status}</span></td>
+                                    <td>
+                                        <div style={{ fontWeight: 500 }}>{fault.title}</div>
+                                        <div className="text-secondary" style={{ fontSize: '0.85rem' }}>{fault.component_name || '-'}</div>
+                                    </td>
+                                    <td>{fault.department_name || '-'}</td>
+                                    <td><span className={`badge priority-${fault.priority.toLowerCase()}`}>{fault.priority}</span></td>
+                                    <td><span className={`badge status-${fault.status.toLowerCase().replace(' ', '_')}`}>{fault.status}</span></td>
                                     <td>{fault.technician_name || <span className="text-muted">Unassigned</span>}</td>
-                                    <td>{new Date(fault.reported_at).toLocaleDateString()}</td>
-                                    <td>{fault.scheduled_maintenance ? new Date(fault.scheduled_maintenance).toLocaleDateString() : '-'}</td>
+                                    <td>{new Date(fault.reported_at).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
+                                    <td>{fault.scheduled_for ? new Date(fault.scheduled_for).toLocaleDateString() : '-'}</td>
                                     <td>
                                         <div className="d-flex gap-1 align-center">
                                             <button className="btn btn-secondary btn-sm" onClick={() => setShowCommentsModal(fault)} style={{ position: 'relative' }}>
@@ -1373,18 +1473,29 @@ function FaultReporting() {
                                                     </span>
                                                 )}
                                             </button>
-                                            {!fault.assigned_to && ['Open', 'Pending'].includes(fault.status) && role === 'Admin' && (
-                                                <button className="btn btn-secondary btn-sm" onClick={() => setShowAssignModal(fault)}>Assign</button>
+
+                                            {/* Assign / Reassign Button for Admin/Manager */}
+                                            {['Open', 'Pending', 'In Progress'].includes(fault.status) && (role === 'Admin' || role === 'Manager') && (
+                                                <button className="btn btn-secondary btn-sm" onClick={() => setShowAssignModal(fault)}>
+                                                    {fault.assigned_to ? 'Reassign' : 'Assign'}
+                                                </button>
                                             )}
-                                            {['Open', 'Pending'].includes(fault.status) && (role === 'Admin' || fault.assigned_to === user_id) && (
+
+                                            {/* Start Work Button for Assigned Technician */}
+                                            {['Open', 'Pending'].includes(fault.status) && fault.assigned_to === user_id && (
                                                 <button className="btn btn-warning btn-sm" onClick={() => handleStatusChange(fault.fault_id, 'In Progress')}>Start Work</button>
                                             )}
-                                            {['Open', 'Pending'].includes(fault.status) && !fault.scheduled_for && (role === 'Admin' || fault.assigned_to === user_id) && (
+
+                                            {/* Schedule Button */}
+                                            {['Open', 'Pending'].includes(fault.status) && !fault.scheduled_for && (role === 'Admin' || role === 'Manager' || fault.assigned_to === user_id) && (
                                                 <button className="btn btn-info btn-sm" style={{ background: 'var(--accent-info)', color: 'white' }} onClick={() => setShowScheduleModal(fault)}>Schedule</button>
                                             )}
-                                            {fault.status === 'In Progress' && (role === 'Admin' || fault.assigned_to === user_id) && (
+
+                                            {/* Mark Fixed Button */}
+                                            {fault.status === 'In Progress' && (role === 'Admin' || role === 'Manager' || fault.assigned_to === user_id) && (
                                                 <button className="btn btn-success btn-sm" onClick={() => handleStatusChange(fault.fault_id, 'Resolved')}>Mark Fixed</button>
                                             )}
+
                                             {['Resolved', 'Closed'].includes(fault.status) && (
                                                 <span className="text-muted" style={{ fontSize: '0.85rem', fontStyle: 'italic' }}>No actions</span>
                                             )}
@@ -1394,7 +1505,7 @@ function FaultReporting() {
                             ))}
                             {faults.length === 0 && (
                                 <tr>
-                                    <td colSpan="8" className="text-center text-muted">No faults found</td>
+                                    <td colSpan="9" className="text-center text-muted">No faults found</td>
                                 </tr>
                             )}
                         </tbody>
@@ -1665,7 +1776,7 @@ function FaultModal({ onClose, onSave }) {
 
 function AssignModal({ fault, onClose, onSave }) {
     const [technicians, setTechnicians] = useState([]);
-    const [selectedTech, setSelectedTech] = useState('');
+    const [selectedTech, setSelectedTech] = useState(fault.assigned_to || '');
 
     useEffect(() => {
         // Fetch all technicians (status filter removed as it's not in Users table)
@@ -1678,6 +1789,19 @@ function AssignModal({ fault, onClose, onSave }) {
             await fetchAPI(`/faults/${fault.fault_id}/assign`, {
                 method: 'PUT',
                 body: JSON.stringify({ technician_id: selectedTech }),
+            });
+            onSave();
+        } catch (error) {
+            alert(error.message);
+        }
+    };
+
+    const handleUnassign = async () => {
+        if (!window.confirm('Are you sure you want to unassign the current technician?')) return;
+        try {
+            await fetchAPI(`/faults/${fault.fault_id}/assign`, {
+                method: 'PUT',
+                body: JSON.stringify({ technician_id: null }),
             });
             onSave();
         } catch (error) {
@@ -1699,14 +1823,23 @@ function AssignModal({ fault, onClose, onSave }) {
                         <select className="form-select" value={selectedTech} onChange={(e) => setSelectedTech(e.target.value)}>
                             <option value="">Choose technician...</option>
                             {technicians.map((tech) => (
-                                <option key={tech.id} value={tech.id}>{tech.name}</option>
+                                <option key={tech.user_id} value={tech.user_id}>{tech.first_name} {tech.last_name} ({tech.email})</option>
                             ))}
                         </select>
                     </div>
                 </div>
-                <div className="modal-footer">
-                    <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-                    <button className="btn btn-primary" onClick={handleAssign} disabled={!selectedTech}>Assign</button>
+                <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
+                    <div>
+                        {fault.assigned_to && (
+                            <button type="button" className="btn btn-secondary" style={{ color: '#DC3545', borderColor: '#DC3545', background: 'transparent' }} onClick={handleUnassign}>Unassign</button>
+                        )}
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+                        <button className="btn btn-primary" onClick={handleAssign} disabled={!selectedTech || Number(selectedTech) === Number(fault.assigned_to)}>
+                            {fault.assigned_to ? 'Reassign' : 'Assign'}
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1718,15 +1851,16 @@ function QualityMetrics() {
     const [kpis, setKpis] = useState(null);
     const [health, setHealth] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [timeRange, setTimeRange] = useState('monthly');
 
     useEffect(() => {
         loadData();
-    }, []);
+    }, [timeRange]);
 
     const loadData = async () => {
         try {
             const [kpiRes, healthRes] = await Promise.all([
-                fetchAPI('/metrics/kpi'),
+                fetchAPI(`/metrics/kpi?time_range=${timeRange}`),
                 fetchAPI('/metrics/health'),
             ]);
             setKpis(kpiRes.data);
@@ -1736,6 +1870,10 @@ function QualityMetrics() {
         } finally {
             setLoading(false);
         }
+    };
+
+    const handlePrint = () => {
+        window.print();
     };
 
     const getHealthClass = (score) => {
@@ -1752,8 +1890,26 @@ function QualityMetrics() {
     return (
         <div>
             <div className="page-header">
-                <h1 className="page-title">Quality Metrics</h1>
-                <p className="page-subtitle">Network performance KPIs and health scores</p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                        <h1 className="page-title">Quality Metrics</h1>
+                        <p className="page-subtitle">Network performance KPIs and health scores</p>
+                    </div>
+                    <div className="action-bar" style={{ marginTop: 0 }}>
+                        <div className="filter-group">
+                            <select
+                                className="filter-select"
+                                value={timeRange}
+                                onChange={(e) => setTimeRange(e.target.value)}
+                            >
+                                <option value="daily">Daily View</option>
+                                <option value="weekly">Weekly View</option>
+                                <option value="monthly">Monthly View</option>
+                            </select>
+                        </div>
+                        <button className="btn btn-secondary" onClick={handlePrint}>Print / Save PDF</button>
+                    </div>
+                </div>
             </div>
 
             <div className="stats-grid">
@@ -1777,7 +1933,9 @@ function QualityMetrics() {
                     <div className="stat-icon danger"><AlertCircle size={24} /></div>
                     <div className="stat-content">
                         <div className="stat-value">{kpis?.fault_frequency_daily || 0}</div>
-                        <div className="stat-label">Daily Fault Frequency</div>
+                        <div className="stat-label">
+                            {timeRange === 'daily' ? 'Total Faults (Today)' : 'Avg Faults / Day'}
+                        </div>
                     </div>
                 </div>
 
@@ -1987,8 +2145,22 @@ function GenerateReportModal({ onClose, onSave, initialData }) {
         summary: '',
     });
     const [loading, setLoading] = useState(false);
+    const [reportType, setReportType] = useState('Custom');
+    const [users, setUsers] = useState([]);
+    const [selectedUser, setSelectedUser] = useState('');
 
     useEffect(() => {
+        // Fetch users for filtering
+        const loadUsers = async () => {
+            try {
+                const response = await fetchAPI('/users');
+                setUsers(response.data);
+            } catch (error) {
+                console.error('Failed to load users:', error);
+            }
+        };
+        loadUsers();
+
         if (initialData) {
             setForm({
                 title: initialData.title,
@@ -2000,8 +2172,33 @@ function GenerateReportModal({ onClose, onSave, initialData }) {
                 avg_resolution_time: Math.round(initialData.avg_resolution_time || 0),
                 summary: initialData.summary || '',
             });
+            // If editing, we might want to check if it filters by user, but initialData might not have that info easily accessible unless we returned it.
+            // For now, simpler to leave user filter empty on edit unless we update backend to return it.
         }
     }, [initialData]);
+
+    const handleReportTypeChange = (type) => {
+        setReportType(type);
+        const now = new Date();
+        const start = new Date(now);
+
+        if (type === 'Daily') {
+            start.setHours(0, 0, 0, 0); // Start of today
+        } else if (type === 'Weekly') {
+            start.setDate(now.getDate() - 7);
+        } else if (type === 'Monthly') {
+            start.setMonth(now.getMonth() - 1);
+        }
+
+        if (type !== 'Custom') {
+            setForm(prev => ({
+                ...prev,
+                start_time: start.toISOString().slice(0, 16),
+                end_time: now.toISOString().slice(0, 16),
+                title: `${type} Incident Report - ${now.toLocaleDateString()}`
+            }));
+        }
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -2010,9 +2207,14 @@ function GenerateReportModal({ onClose, onSave, initialData }) {
             const url = initialData ? `/reports/${initialData.report_id}` : '/reports/generate';
             const method = initialData ? 'PUT' : 'POST';
 
+            const payload = {
+                ...form,
+                reported_by: selectedUser || undefined // Only send if selected
+            };
+
             await fetchAPI(url, {
                 method,
-                body: JSON.stringify(form),
+                body: JSON.stringify(payload),
             });
             onSave();
         } catch (error) {
@@ -2031,56 +2233,88 @@ function GenerateReportModal({ onClose, onSave, initialData }) {
                 </div>
                 <form onSubmit={handleSubmit}>
                     <div className="modal-body">
+                        {!initialData && (
+                            <div className="form-group">
+                                <label className="form-label">Report Type</label>
+                                <div className="grid-4" style={{ gap: '10px' }}>
+                                    {['Custom', 'Daily', 'Weekly', 'Monthly'].map(type => (
+                                        <button
+                                            key={type}
+                                            type="button"
+                                            className={`btn ${reportType === type ? 'btn-primary' : 'btn-secondary'}`}
+                                            onClick={() => handleReportTypeChange(type)}
+                                            style={{ width: '100%', fontSize: '0.9rem' }}
+                                        >
+                                            {type}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
                         <div className="form-group">
                             <label className="form-label">Report Title *</label>
                             <input className="form-input" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g., Weekly Incident Report" required />
                         </div>
+
+                        {!initialData && (
+                            <div className="form-group">
+                                <label className="form-label">Filter by Reporter (Optional)</label>
+                                <select className="form-select" value={selectedUser} onChange={(e) => setSelectedUser(e.target.value)}>
+                                    <option value="">All Users</option>
+                                    {users.map(u => (
+                                        <option key={u.user_id} value={u.user_id}>{u.username} ({u.first_name} {u.last_name})</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+
                         <div className="grid-2">
                             <div className="form-group">
                                 <label className="form-label">Start Date *</label>
-                                <input type="datetime-local" className="form-input" value={form.start_time} onChange={(e) => setForm({ ...form, start_time: e.target.value })} required />
+                                <input type="datetime-local" className="form-input" value={form.start_time} onChange={(e) => { setForm({ ...form, start_time: e.target.value }); setReportType('Custom'); }} required />
                             </div>
                             <div className="form-group">
                                 <label className="form-label">End Date *</label>
-                                <input type="datetime-local" className="form-input" value={form.end_time} onChange={(e) => setForm({ ...form, end_time: e.target.value })} required />
+                                <input type="datetime-local" className="form-input" value={form.end_time} onChange={(e) => { setForm({ ...form, end_time: e.target.value }); setReportType('Custom'); }} required />
                             </div>
                         </div>
 
                         <div className="grid-2">
                             <div className="form-group">
                                 <label className="form-label">Impact Level *</label>
-                                <select className="form-input" value={form.impact_level} onChange={(e) => setForm({ ...form, impact_level: e.target.value })} required>
+                                <select className="form-select" value={form.impact_level} onChange={(e) => setForm({ ...form, impact_level: e.target.value })} required>
                                     <option value="minor">Minor</option>
                                     <option value="major">Major</option>
                                     <option value="critical">Critical</option>
                                 </select>
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Total Faults</label>
-                                <input type="number" min="0" className="form-input" value={form.total_faults} onChange={(e) => setForm({ ...form, total_faults: parseInt(e.target.value) || 0 })} />
+                                <label className="form-label">Total Faults (Auto)</label>
+                                <input type="number" min="0" className="form-input" value={form.total_faults} onChange={(e) => setForm({ ...form, total_faults: parseInt(e.target.value) || 0 })} disabled={!initialData} />
                             </div>
                         </div>
 
                         <div className="grid-2">
                             <div className="form-group">
-                                <label className="form-label">Components Affected</label>
-                                <input type="number" min="0" className="form-input" value={form.affected_components} onChange={(e) => setForm({ ...form, affected_components: parseInt(e.target.value) || 0 })} />
+                                <label className="form-label">Components Affected (Auto)</label>
+                                <input type="number" min="0" className="form-input" value={form.affected_components} onChange={(e) => setForm({ ...form, affected_components: parseInt(e.target.value) || 0 })} disabled={!initialData} />
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Avg Resolution (min)</label>
-                                <input type="number" min="0" className="form-input" value={form.avg_resolution_time} onChange={(e) => setForm({ ...form, avg_resolution_time: parseInt(e.target.value) || 0 })} />
+                                <label className="form-label">Avg Resolution (min) (Auto)</label>
+                                <input type="number" min="0" className="form-input" value={form.avg_resolution_time} onChange={(e) => setForm({ ...form, avg_resolution_time: parseInt(e.target.value) || 0 })} disabled={!initialData} />
                             </div>
                         </div>
 
                         <div className="form-group">
-                            <label className="form-label">Summary (Optional)</label>
-                            <textarea className="form-textarea" value={form.summary} onChange={(e) => setForm({ ...form, summary: e.target.value })} placeholder="Optional summary notes..." />
+                            <label className="form-label">Summary / Notes</label>
+                            <textarea className="form-input" rows="3" value={form.summary} onChange={(e) => setForm({ ...form, summary: e.target.value })}></textarea>
                         </div>
                     </div>
                     <div className="modal-footer">
-                        <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+                        <button type="button" className="btn btn-text" onClick={onClose}>Cancel</button>
                         <button type="submit" className="btn btn-primary" disabled={loading}>
-                            {loading ? 'Saving...' : (initialData ? 'Update Report' : 'Generate Report')}
+                            {loading ? 'Processing...' : (initialData ? 'Update Report' : 'Generate Report')}
                         </button>
                     </div>
                 </form>
@@ -2090,14 +2324,41 @@ function GenerateReportModal({ onClose, onSave, initialData }) {
 }
 
 function ReportDetailModal({ report, onClose }) {
-    const details = report.details ? JSON.parse(report.details) : {};
+    const details = report.details ? (typeof report.details === 'string' ? JSON.parse(report.details) : report.details) : {};
+
+    // Function to download PDF (reused logic or passed down could be better but duplicating for simplicity here as context isn't fully exposed)
+    const handleDownload = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`http://localhost:3000/api/reports/${report.report_id}/pdf`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (!response.ok) throw new Error('Failed to generate PDF');
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `incident_report_${report.report_id}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        } catch (error) {
+            alert('Failed to download PDF: ' + error.message);
+        }
+    };
 
     return (
         <div className="modal-overlay" onClick={onClose}>
-            <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 700 }}>
+            <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 800 }}>
                 <div className="modal-header">
                     <h3 className="modal-title">{report.title}</h3>
-                    <button className="modal-close" onClick={onClose}>&times;</button>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                        <button className="btn btn-secondary btn-sm" onClick={handleDownload} title="Download PDF">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="feather feather-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> PDF
+                        </button>
+                        <button className="modal-close" onClick={onClose}>&times;</button>
+                    </div>
                 </div>
                 <div className="modal-body">
                     <div className="stats-grid mb-3">
@@ -2115,36 +2376,74 @@ function ReportDetailModal({ report, onClose }) {
                         </div>
                     </div>
 
-                    <p className="mb-2"><strong>Period:</strong> {new Date(report.start_time).toLocaleString()} - {new Date(report.end_time).toLocaleString()}</p>
-                    <p className="mb-2"><strong>Impact Level:</strong> <span className={`badge priority-${report.impact_level}`}>{report.impact_level}</span></p>
-                    <p className="mb-3">{report.summary}</p>
+                    <div className="grid-2 mb-3">
+                        <p><strong>Period:</strong> {new Date(report.start_time).toLocaleString()} - {new Date(report.end_time).toLocaleString()}</p>
+                        <p><strong>Impact Level:</strong> <span className={`badge priority-${report.impact_level}`}>{report.impact_level}</span></p>
+                        {details.filter?.reported_by && details.filter.reported_by !== 'All Users' && (
+                            <p><strong>Filtered By User ID:</strong> {details.filter.reported_by}</p>
+                        )}
+                    </div>
+
+                    <div className="card mb-3" style={{ background: 'var(--bg-tertiary)' }}>
+                        <h4 style={{ marginBottom: '0.5rem' }}>Summary</h4>
+                        <p>{report.summary}</p>
+                    </div>
 
                     {details.statistics && (
-                        <div className="card" style={{ background: 'var(--bg-tertiary)' }}>
-                            <h4 style={{ marginBottom: 'var(--space-md)' }}>Statistics</h4>
-                            <div className="grid-2">
-                                <div>
-                                    <strong>By Priority:</strong>
-                                    <ul style={{ listStyle: 'none', marginTop: 'var(--space-sm)' }}>
-                                        {Object.entries(details.statistics.by_priority || {}).map(([k, v]) => (
-                                            <li key={k}>{k}: {v}</li>
-                                        ))}
-                                    </ul>
-                                </div>
-                                <div>
-                                    <strong>By Status:</strong>
-                                    <ul style={{ listStyle: 'none', marginTop: 'var(--space-sm)' }}>
-                                        {Object.entries(details.statistics.by_status || {}).map(([k, v]) => (
-                                            <li key={k}>{k.replace('_', ' ')}: {v}</li>
-                                        ))}
-                                    </ul>
-                                </div>
+                        <div className="grid-2 mb-3">
+                            <div className="card" style={{ background: 'var(--bg-card)' }}>
+                                <h5 className="mb-2">By Priority</h5>
+                                <ul className="list-unstyled">
+                                    {Object.entries(details.statistics.by_priority || {}).map(([k, v]) => (
+                                        <li key={k} className="d-flex justify-content-between">
+                                            <span style={{ textTransform: 'capitalize' }}>{k}</span>
+                                            <span style={{ fontWeight: 600 }}>{v}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                            <div className="card" style={{ background: 'var(--bg-card)' }}>
+                                <h5 className="mb-2">By Status</h5>
+                                <ul className="list-unstyled">
+                                    {Object.entries(details.statistics.by_status || {}).map(([k, v]) => (
+                                        <li key={k} className="d-flex justify-content-between">
+                                            <span style={{ textTransform: 'capitalize' }}>{k.replace('_', ' ')}</span>
+                                            <span style={{ fontWeight: 600 }}>{v}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Detailed Faults List with Descriptions */}
+                    {details.faults && details.faults.length > 0 && (
+                        <div>
+                            <h4 style={{ marginBottom: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>Fault Details</h4>
+                            <div className="report-faults-list" style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                                {details.faults.map((fault, idx) => (
+                                    <div key={idx} style={{ marginBottom: '1rem', paddingBottom: '1rem', borderBottom: '1px solid #eee' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                                            <strong>{idx + 1}. {fault.title}</strong>
+                                            <span className={`badge priority-${fault.priority}`}>{fault.priority}</span>
+                                        </div>
+                                        <div style={{ fontSize: '0.9rem', color: '#555', marginBottom: '0.25rem' }}>
+                                            <span style={{ marginRight: '1rem' }}>📦 {fault.component}</span>
+                                            <span style={{ marginRight: '1rem' }}>👤 Reported by: {fault.reporter || 'Unknown'}</span>
+                                            <span>📅 {new Date(fault.reported_at).toLocaleDateString()}</span>
+                                        </div>
+                                        <div style={{ background: '#f9f9f9', padding: '0.5rem', borderRadius: '4px', borderLeft: '3px solid #ccc' }}>
+                                            <em style={{ fontSize: '0.9rem' }}>"{fault.description}"</em>
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     )}
                 </div>
                 <div className="modal-footer">
                     <button className="btn btn-secondary" onClick={onClose}>Close</button>
+                    <button className="btn btn-primary" onClick={handleDownload}>Download PDF</button>
                 </div>
             </div>
         </div>
@@ -2153,7 +2452,7 @@ function ReportDetailModal({ report, onClose }) {
 
 // Technicians Component
 function Technicians() {
-    const { role } = useContext(AuthContext) || {};
+    const { role, user_id } = useContext(AuthContext) || {};
     const [technicians, setTechnicians] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
@@ -2168,7 +2467,14 @@ function Technicians() {
     const loadTechnicians = async () => {
         try {
             const response = await fetchAPI('/technicians');
-            setTechnicians(response.data);
+            let data = response.data;
+            // Sorting Logic
+            if (role === 'Admin') {
+                data.sort((a, b) => (a.role === 'Manager' ? -1 : 1));
+            } else if (role === 'Manager') {
+                data.sort((a, b) => (Number(a.id) === Number(user_id) ? -1 : 1));
+            }
+            setTechnicians(data);
         } catch (error) {
             console.error('Failed to load technicians:', error);
         } finally {
@@ -2276,17 +2582,22 @@ function Technicians() {
             ) : (
                 <>
                     {/* Active Technicians */}
-                    <h3 style={{ marginBottom: '1rem', color: 'var(--primary)' }}>👷 Technicians ({technicians.filter(t => t.status === 'Active' && t.role === 'Technician').length})</h3>
+                    <h3 style={{ marginBottom: '1rem', color: 'var(--primary)' }}>👷 Team ({technicians.filter(t => t.status === 'Active' && t.role !== 'Staff').length})</h3>
                     <div className="stats-grid">
-                        {technicians.filter(t => t.status === 'Active' && t.role === 'Technician').map((tech) => (
+                        {technicians.filter(t => t.status === 'Active' && t.role !== 'Staff').map((tech) => (
                             <div key={tech.id} className="card">
                                 <div className="d-flex align-center gap-2 mb-2">
                                     <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--gradient-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem' }}>
                                         {tech.name[0]}
                                     </div>
                                     <div className="flex-1">
-                                        <div style={{ fontWeight: 600 }}>{tech.name}</div>
-                                        <div className="text-muted" style={{ fontSize: '0.875rem' }}>Technician</div>
+                                        <div style={{ fontWeight: 600 }}>
+                                            {tech.name}
+                                            {Number(tech.id) === Number(user_id) &&
+                                                <span className="badge badge-primary" style={{ fontSize: '0.7em', padding: '2px 6px', marginLeft: '6px' }}>You</span>
+                                            }
+                                        </div>
+                                        <div className="text-muted" style={{ fontSize: '0.875rem' }}>{tech.role}</div>
                                     </div>
                                 </div>
                                 <div className="text-muted mb-2" style={{ fontSize: '0.875rem' }}>
@@ -2327,8 +2638,8 @@ function Technicians() {
                                 )}
                             </div>
                         ))}
-                        {technicians.filter(t => t.status === 'Active' && t.role === 'Technician').length === 0 && (
-                            <div className="text-muted">No active technicians</div>
+                        {technicians.filter(t => t.status === 'Active' && t.role !== 'Staff').length === 0 && (
+                            <div className="text-muted">No active team members</div>
                         )}
                     </div>
 
@@ -2506,6 +2817,7 @@ function PasswordResetModal({ technician, onClose }) {
 }
 
 function TechnicianModal({ technician, onClose, onSave }) {
+    const [departments, setDepartments] = useState([]);
     const [form, setForm] = useState({
         username: '',
         password: '',
@@ -2514,7 +2826,12 @@ function TechnicianModal({ technician, onClose, onSave }) {
         last_name: technician?.name?.split(' ')[1] || '',
         email: technician?.email || '',
         phone_number: technician?.phone || '',
+        department_id: technician?.department_id || '',
     });
+
+    useEffect(() => {
+        fetchAPI('/departments').then(res => setDepartments(res.data));
+    }, []);
 
     const handleSubmit = (e) => {
         e.preventDefault();
@@ -2539,6 +2856,17 @@ function TechnicianModal({ technician, onClose, onSave }) {
                                         <option value="Staff">Staff (Office Worker)</option>
                                     </select>
                                 </div>
+                                {(form.role === 'Technician' || form.role === 'Staff') && (
+                                    <div className="form-group">
+                                        <label className="form-label">Department</label>
+                                        <select className="form-select" value={form.department_id} onChange={(e) => setForm({ ...form, department_id: e.target.value })}>
+                                            <option value="">Select Department</option>
+                                            {departments.map((dept) => (
+                                                <option key={dept.department_id} value={dept.department_id}>{dept.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
                                 <div className="form-group">
                                     <label className="form-label">Username *</label>
                                     <input className="form-input" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} required />
@@ -2632,6 +2960,7 @@ export default function App() {
                             <Route path="/maintenance" element={<MaintenanceLogs />} />
                             <Route path="/inventory" element={<Inventory />} />
                             <Route path="/map" element={<NetworkMap />} />
+                            {(user?.role === 'Technician' || user?.role === 'Staff') && <Route path="/team" element={<TeamDirectory />} />}
                             <Route path="/technicians" element={<Technicians />} />
                             <Route path="/audit" element={<ProtectedRoute roles={['Admin']}><AuditLogs /></ProtectedRoute>} />
                             <Route path="*" element={<Navigate to="/" replace />} />
@@ -2644,23 +2973,28 @@ export default function App() {
 }
 
 function MaintenanceLogs() {
-    const { role } = useContext(AuthContext) || {};
+    const { role, user_id } = useContext(AuthContext) || {};
     const [logs, setLogs] = useState([]);
+    const [components, setComponents] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showCommentsModal, setShowCommentsModal] = useState(null);
     const [showAddModal, setShowAddModal] = useState(false);
     const [editLog, setEditLog] = useState(null);
 
     useEffect(() => {
-        loadLogs();
+        loadData();
     }, []);
 
-    const loadLogs = async () => {
+    const loadData = async () => {
         try {
-            const response = await fetchAPI('/maintenance');
-            setLogs(response.data);
+            const [logsRes, compsRes] = await Promise.all([
+                fetchAPI('/maintenance'),
+                fetchAPI('/components')
+            ]);
+            setLogs(logsRes.data);
+            setComponents(compsRes.data || []);
         } catch (error) {
-            console.error('Failed to load logs:', error);
+            console.error('Failed to load data:', error);
         } finally {
             setLoading(false);
         }
@@ -2731,6 +3065,7 @@ function MaintenanceLogs() {
                     <table className="table">
                         <thead>
                             <tr>
+                                <th>ID</th>
                                 <th>Date</th>
                                 <th>Component</th>
                                 <th>Technician</th>
@@ -2738,24 +3073,45 @@ function MaintenanceLogs() {
                                 <th>Result</th>
                                 <th>Duration</th>
                                 <th>Notes</th>
-                                {(role === 'Admin' || role === 'Manager') && <th>Actions</th>}
+                                {['Admin', 'Manager', 'Technician'].includes(role) && <th>Actions</th>}
                             </tr>
                         </thead>
                         <tbody>
                             {logs.map((log) => (
                                 <tr key={log.log_id}>
-                                    <td style={{ fontWeight: 500 }}>{log.activity_date ? new Date(log.activity_date).toLocaleDateString() : '-'}</td>
+                                    <td style={{ fontWeight: 500 }}>{`ML-${log.log_id.toString().padStart(3, '0')}`}</td>
+                                    <td>{log.activity_date ? new Date(log.activity_date).toLocaleString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
                                     <td>{log.component_name || '-'}</td>
                                     <td>{log.technician_name || '-'}</td>
                                     <td>{log.action_taken || '-'}</td>
-                                    <td>{log.result || '-'}</td>
+                                    <td><span className={`badge status-${(log.result || '').toLowerCase()}`}>{log.result || '-'}</span></td>
                                     <td>{log.duration_minutes ? `${log.duration_minutes}m` : '-'}</td>
                                     <td>
                                         <button className="btn btn-secondary btn-sm" onClick={() => setShowCommentsModal(log)} style={{ position: 'relative' }}>
-                                            💬 {log.comment_count > 0 ? (log.comment_count === 1 ? '1 note' : `${log.comment_count} notes`) : 'Add note'}
+                                            💬 {log.comment_count > 0 && <span style={{ marginLeft: '4px', fontSize: '0.8rem' }}>{log.comment_count === 1 ? '1 NOTE' : `${log.comment_count} NOTES`}</span>}
+                                            {log.comment_count === 0 && 'Add Note'}
+                                            {log.comment_count > 0 && (
+                                                <span style={{
+                                                    position: 'absolute',
+                                                    top: -6,
+                                                    right: -6,
+                                                    background: Number(log.last_comment_user_id) === Number(user_id) ? '#28A745' : '#DC3545',
+                                                    color: 'white',
+                                                    borderRadius: '50%',
+                                                    width: 18,
+                                                    height: 18,
+                                                    fontSize: '0.7rem',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    fontWeight: 'bold'
+                                                }}>
+                                                    {log.comment_count}
+                                                </span>
+                                            )}
                                         </button>
                                     </td>
-                                    {(role === 'Admin' || role === 'Manager') && (
+                                    {['Admin', 'Manager', 'Technician'].includes(role) && (
                                         <td>
                                             <div className="d-flex gap-1">
                                                 <button className="btn btn-secondary btn-sm" onClick={() => { setEditLog(log); setShowAddModal(true); }}>Edit</button>
@@ -2894,7 +3250,7 @@ function AddMaintenanceLogModal({ onClose, onSave, initialData }) {
                                 disabled={!!initialData}
                             >
                                 <option value="">-- Select Component --</option>
-                                {components.map(c => <option key={c.component_id} value={c.component_id}>{c.name}</option>)}
+                                {components.map(c => <option key={c.component_id} value={c.component_id}>{c.name} - {c.location}</option>)}
                             </select>
                         </div>
                         <div className="grid-2">
@@ -3017,6 +3373,16 @@ function MaintenanceCommentsModal({ log, onClose }) {
         });
     };
 
+    const getRoleBadgeColor = (role) => {
+        switch (role) {
+            case 'Admin': return 'var(--primary)'; // Green
+            case 'Manager': return '#2B6CB0'; // Blue
+            case 'Technician': return '#DDA15E'; // Orange/Tan
+            case 'Staff': return '#718096'; // Grey
+            default: return '#DDA15E';
+        }
+    };
+
     return (
         <div className="modal-overlay" onClick={onClose}>
             <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
@@ -3053,7 +3419,7 @@ function MaintenanceCommentsModal({ log, onClose }) {
                                                 <span className="badge" style={{
                                                     marginLeft: 8,
                                                     fontSize: '0.7rem',
-                                                    background: c.user_role === 'Admin' ? 'var(--primary)' : '#DDA15E',
+                                                    background: getRoleBadgeColor(c.user_role),
                                                     color: 'white'
                                                 }}>
                                                     {c.user_role}
@@ -3129,6 +3495,33 @@ function AuditLogs() {
         }
     };
 
+    const handlePrint = () => { window.print(); };
+
+    const handleExport = () => {
+        const csv = [
+            ['Timestamp', 'User', 'Role', 'Action', 'Entity Type', 'Entity ID', 'Details', 'IP Address'],
+            ...logs.map(log => [
+                log.created_at,
+                log.user_name,
+                log.user_email, // Using email as proxy for role/identity detail or we can fetch role if available
+                log.action,
+                log.entity_type,
+                log.entity_id,
+                `"${String(log.details).replace(/"/g, '""')}"`, // Escape quotes
+                log.ip_address
+            ])
+        ].map(e => e.join(',')).join('\n');
+
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `audit_logs_${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    };
+
     return (
         <div>
             <div className="page-header">
@@ -3146,7 +3539,11 @@ function AuditLogs() {
                         <option value="Component">Components</option>
                     </select>
                 </div>
-                <button className="btn btn-secondary" onClick={loadLogs}>Refresh</button>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button className="btn btn-secondary" onClick={handlePrint}>Print</button>
+                    <button className="btn btn-secondary" onClick={handleExport}>Export CSV</button>
+                    <button className="btn btn-secondary" onClick={loadLogs}>Refresh</button>
+                </div>
             </div>
 
             <div className="card">
@@ -3456,6 +3853,7 @@ function InventoryModal({ item, categories, onClose, onSave }) {
 
 // Network Map Component - Enhanced with stat cards
 function NetworkMap() {
+    const { role, user_id } = useContext(AuthContext) || {};
     const [components, setComponents] = useState([]);
     const [faults, setFaults] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -3480,9 +3878,14 @@ function NetworkMap() {
         }
     };
 
+    // Filter faults based on role (Technician sees only their assigned faults)
+    const relevantFaults = role === 'Technician'
+        ? faults.filter(f => Number(f.assigned_to) === Number(user_id))
+        : faults;
+
     const getMarkerColor = (component) => {
-        // Check if this component has faults
-        const hasFault = faults.some(f => f.component_id === component.component_id && (f.status === 'Open' || f.status === 'In Progress'));
+        // Check if this component has faults (assigned to me if technician)
+        const hasFault = relevantFaults.some(f => f.component_id === component.component_id && (f.status === 'Open' || f.status === 'In Progress'));
         if (hasFault) return '#E53E3E'; // Red for faults
         if (component.status === 'Maintenance') return '#805AD5'; // Purple for Maintenance (Distinct from Red)
         if (component.status === 'Active') return '#48BB78'; // Green
@@ -3490,7 +3893,7 @@ function NetworkMap() {
     };
 
     const filteredComponents = components.filter(c => {
-        const hasFault = faults.some(f => f.component_id === c.component_id && (f.status === 'Open' || f.status === 'In Progress'));
+        const hasFault = relevantFaults.some(f => f.component_id === c.component_id && (f.status === 'Open' || f.status === 'In Progress'));
 
         if (filter === 'all') return true;
         if (filter === 'faults') return hasFault;
@@ -3500,10 +3903,21 @@ function NetworkMap() {
     });
 
     // Stats
-    const activeFaults = faults.filter(f => f.status === 'Open' || f.status === 'In Progress').length;
+    const activeFaultsCount = relevantFaults.filter(f => f.status === 'Open' || f.status === 'In Progress').length;
+    // Maintenance count: If technician, implies "Under Maintenance" (global state), 
+    // but user asked "only indicate issues related to him".
+    // Since 'Maintenance' is a component status, for now we keep it global unless we fetch logs. 
+    // However, if we strictly follow "only issues related to him", we might hide generic maintenance? 
+    // Let's assume Maintenance status is visible to all, but Faults are strictly filtered.
     const maintenanceCount = components.filter(c => c.status === 'Maintenance').length;
+
+    // Corrected Active Count: Must exclude those with Faults (that are being shown as faults)
+    const activeHealthyCount = components.filter(c =>
+        c.status === 'Active' &&
+        !relevantFaults.some(f => f.component_id === c.component_id && (f.status === 'Open' || f.status === 'In Progress'))
+    ).length;
+
     const mappedComponents = components.length;
-    const regions = [...new Set(components.map(c => c.location?.split(',')[0]?.trim()))].length;
 
     if (loading) {
         return <div className="loading-container"><div className="spinner"></div></div>;
@@ -3518,13 +3932,13 @@ function NetworkMap() {
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <button className={`btn btn-sm ${filter === 'faults' ? '' : 'btn-secondary'}`} style={{ background: filter === 'faults' ? '#E53E3E' : undefined }} onClick={() => setFilter(filter === 'faults' ? 'all' : 'faults')}>
-                        <AlertTriangle size={14} style={{ marginRight: 4 }} /> Faults ({activeFaults})
+                        <AlertTriangle size={14} style={{ marginRight: 4 }} /> Faults ({activeFaultsCount})
                     </button>
                     <button className={`btn btn-sm ${filter === 'maintenance' ? '' : 'btn-secondary'}`} style={{ background: filter === 'maintenance' ? '#805AD5' : undefined }} onClick={() => setFilter(filter === 'maintenance' ? 'all' : 'maintenance')}>
                         <Wrench size={14} style={{ marginRight: 4 }} /> Maintenance ({maintenanceCount})
                     </button>
                     <button className={`btn btn-sm ${filter === 'active' ? '' : 'btn-secondary'}`} style={{ background: filter === 'active' ? '#48BB78' : undefined }} onClick={() => setFilter(filter === 'active' ? 'all' : 'active')}>
-                        <CheckCircle size={14} style={{ marginRight: 4 }} /> Active ({components.filter(c => c.status === 'Active').length})
+                        <CheckCircle size={14} style={{ marginRight: 4 }} /> Active ({activeHealthyCount})
                     </button>
                 </div>
             </div>
@@ -3534,7 +3948,7 @@ function NetworkMap() {
                 <div className="stat-card">
                     <div className="stat-icon danger"><AlertTriangle size={24} color="white" /></div>
                     <div className="stat-content">
-                        <div className="stat-value">{activeFaults}</div>
+                        <div className="stat-value">{activeFaultsCount}</div>
                         <div className="stat-label">Active Faults</div>
                     </div>
                 </div>
@@ -3552,13 +3966,7 @@ function NetworkMap() {
                         <div className="stat-label">Mapped Components</div>
                     </div>
                 </div>
-                <div className="stat-card">
-                    <div className="stat-icon info"><Activity size={24} color="white" /></div>
-                    <div className="stat-content">
-                        <div className="stat-value">{regions}</div>
-                        <div className="stat-label">Regions</div>
-                    </div>
-                </div>
+                {/* Regions stat card removed due to undefined variable */}
             </div>
 
             {/* Map */}
@@ -3622,3 +4030,91 @@ function NetworkMap() {
 
 
 
+
+function TeamDirectory() {
+    const { role } = useContext(AuthContext) || {};
+    const [staff, setStaff] = useState([]);
+    const [technicians, setTechnicians] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        loadTeam();
+    }, []);
+
+    const loadTeam = async () => {
+        try {
+            // Staff see only Staff. Technicians see Technicians AND Staff.
+            const promises = [fetchAPI('/users?role=Staff')];
+
+            if (role === 'Technician') {
+                promises.push(fetchAPI('/users?role=Technician'));
+            }
+
+            const results = await Promise.all(promises);
+            setStaff(results[0].data);
+
+            if (role === 'Technician' && results[1]) {
+                setTechnicians(results[1].data);
+            }
+        } catch (error) {
+            console.error('Failed to load team:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const UserTable = ({ users, title }) => (
+        <div className="card mb-4">
+            <div className="card-header">
+                <h3 className="card-title">{title}</h3>
+            </div>
+            <div className="table-container">
+                <table className="table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Department</th>
+                            <th>Email</th>
+                            <th>Phone</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {users.map((user) => (
+                            <tr key={user.user_id}>
+                                <td style={{ fontWeight: 500 }}>{user.first_name} {user.last_name}</td>
+                                <td><span className="badge badge-info">{user.department_name || 'Unassigned'}</span></td>
+                                <td>{user.email || '-'}</td>
+                                <td>{user.phone_number || '-'}</td>
+                                <td><span className={`badge status-${(user.status || 'Active').toLowerCase()}`}>{user.status}</span></td>
+                            </tr>
+                        ))}
+                        {users.length === 0 && (
+                            <tr>
+                                <td colSpan="5" className="text-center text-muted">No members found</td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+
+    return (
+        <div>
+            <div className="page-header">
+                <h1 className="page-title">Team Directory</h1>
+                <p className="page-subtitle">Contact information for team members</p>
+            </div>
+
+            {loading ? (
+                <div className="loading-container"><div className="spinner"></div></div>
+            ) : (
+                <div>
+                    {role === 'Technician' && <UserTable users={technicians} title="Technicians" />}
+                    <UserTable users={staff} title="Staff Members" />
+                </div>
+            )}
+        </div>
+    );
+}

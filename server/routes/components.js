@@ -9,25 +9,30 @@ const router = express.Router();
 router.get('/', authenticateToken, async (req, res) => {
     try {
         const { type, status, search } = req.query;
-        let query = 'SELECT * FROM Network_Components WHERE 1=1';
+        let query = `
+            SELECT nc.*, d.name as department_name 
+            FROM Network_Components nc
+            LEFT JOIN Departments d ON nc.department_id = d.department_id
+            WHERE 1=1
+        `;
         const params = [];
 
         if (type) {
-            query += ' AND type = ?';
+            query += ' AND nc.type = ?';
             params.push(type);
         }
 
         if (status) {
-            query += ' AND status = ?';
+            query += ' AND nc.status = ?';
             params.push(status);
         }
 
         if (search) {
-            query += ' AND (name LIKE ? OR location LIKE ?)';
-            params.push(`%${search}%`, `%${search}%`);
+            query += ' AND (nc.name LIKE ? OR nc.location LIKE ? OR d.name LIKE ?)';
+            params.push(`%${search}%`, `%${search}%`, `%${search}%`);
         }
 
-        query += ' ORDER BY type ASC, name ASC';
+        query += ' ORDER BY nc.type ASC, nc.name ASC';
 
         const [components] = await pool.query(query, params);
 
@@ -99,7 +104,7 @@ router.post('/', authenticateToken, requireRole('Admin', 'Technician'), async (r
         const {
             name, type, model_number,
             ip_address, mac_address, location, status = 'Active',
-            config_details, install_date, latitude, longitude
+            config_details, install_date, latitude, longitude, department_id
         } = req.body;
 
         if (!name || !type) {
@@ -109,12 +114,15 @@ router.post('/', authenticateToken, requireRole('Admin', 'Technician'), async (r
             });
         }
 
+        // If department_id is provided but location is missing, we could auto-fill location from department?
+        // But for now, let's keep location as required or passed from frontend.
+
         const [result] = await pool.query(
             `INSERT INTO Network_Components 
-       (name, type, model_number, ip_address, mac_address, location, status, config_details, install_date, latitude, longitude) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (name, type, model_number, ip_address, mac_address, location, status, config_details, install_date, latitude, longitude, department_id) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [name, type, model_number, ip_address, mac_address, location, status,
-                config_details, install_date, latitude, longitude]
+                config_details, install_date, latitude, longitude, department_id || null]
         );
 
         res.status(201).json({
@@ -146,7 +154,7 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'Technician'), async 
     try {
         const {
             name, type, model_number,
-            ip_address, mac_address, location, status, config_details, install_date, latitude, longitude
+            ip_address, mac_address, location, status, config_details, install_date, latitude, longitude, department_id
         } = req.body;
 
         const [result] = await pool.query(
@@ -161,10 +169,11 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'Technician'), async 
        config_details = COALESCE(?, config_details),
        install_date = COALESCE(?, install_date),
        latitude = COALESCE(?, latitude),
-       longitude = COALESCE(?, longitude)
+       longitude = COALESCE(?, longitude),
+       department_id = COALESCE(?, department_id)
        WHERE component_id = ?`,
             [name, type, model_number, ip_address, mac_address, location, status,
-                config_details, install_date, latitude, longitude, req.params.id]
+                config_details, install_date, latitude, longitude, department_id, req.params.id]
         );
 
         if (result.affectedRows === 0) {

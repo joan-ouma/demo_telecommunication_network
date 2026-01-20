@@ -17,6 +17,8 @@ import searchRoutes from './server/routes/search.js';
 import auditRoutes from './server/routes/audit.js';
 import inventoryRoutes from './server/routes/inventory.js';
 import notificationsRoutes from './server/routes/notifications.js';
+import departmentsRoutes from './server/routes/departments.js';
+import usersRoutes from './server/routes/users.js';
 
 dotenv.config();
 
@@ -46,6 +48,9 @@ app.use('/api/maintenance', maintenanceRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/inventory', inventoryRoutes);
+app.use('/api/departments', departmentsRoutes);
+app.use('/api/users', usersRoutes);
+
 
 // Health check
 app.get('/api/health', (req, res) => {

@@ -32,7 +32,7 @@ router.get('/', authenticateToken, async (req, res) => {
             params.push(technician_id);
         }
 
-        query += ' ORDER BY ml.activity_date DESC';
+        query += ' ORDER BY ml.log_id ASC';
 
         const [logs] = await pool.query(query, params);
 
@@ -105,8 +105,8 @@ router.post('/', authenticateToken, requireRole('Admin', 'Technician', 'Manager'
     }
 });
 
-// Update maintenance log (Admin, Manager)
-router.put('/:id', authenticateToken, requireRole('Admin', 'Manager'), async (req, res) => {
+// Update maintenance log (Admin, Manager, Technician)
+router.put('/:id', authenticateToken, requireRole('Admin', 'Manager', 'Technician'), async (req, res) => {
     try {
         const { action_taken, result, duration_minutes } = req.body;
         await pool.query(

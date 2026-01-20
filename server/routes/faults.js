@@ -8,17 +8,19 @@ const router = express.Router();
 // Get all faults with filtering
 router.get('/', authenticateToken, async (req, res) => {
     try {
-        const { status, priority, category, component_id, technician_id, from_date, to_date } = req.query;
+        const { status, priority, category, component_id, technician_id, from_date, to_date, reported_by } = req.query;
         const currentUserId = req.user.id;
         let query = `
       SELECT f.*,
             nc.name as component_name, nc.type as component_type,
+            d.name as department_name,
             CONCAT(t.first_name, ' ', t.last_name) as technician_name,
             u.username as reported_by_name,
             (SELECT COUNT(*) FROM Fault_Comments fc WHERE fc.fault_id = f.fault_id) as comment_count,
     (SELECT user_id FROM Fault_Comments fc WHERE fc.fault_id = f.fault_id ORDER BY created_at DESC LIMIT 1) as last_comment_user_id
       FROM Faults f
       LEFT JOIN Network_Components nc ON f.component_id = nc.component_id
+      LEFT JOIN Departments d ON nc.department_id = d.department_id
       LEFT JOIN Users t ON f.assigned_to = t.user_id
       LEFT JOIN Users u ON f.reported_by = u.user_id
       WHERE 1 = 1
@@ -50,6 +52,11 @@ router.get('/', authenticateToken, async (req, res) => {
             params.push(technician_id);
         }
 
+        if (reported_by) {
+            query += ' AND f.reported_by = ?';
+            params.push(reported_by);
+        }
+
         if (from_date) {
             query += ' AND DATE(f.reported_at) >= ?';
             params.push(from_date);
@@ -60,8 +67,8 @@ router.get('/', authenticateToken, async (req, res) => {
             params.push(to_date);
         }
 
-        // Default sort by reported date (newest first)
-        query += ' ORDER BY f.reported_at DESC';
+        // Sort by ID ascending (starting from FLT-001)
+        query += ' ORDER BY f.fault_id ASC';
 
         const [faults] = await pool.query(query, params);
 
@@ -177,30 +184,46 @@ router.put('/:id/assign', authenticateToken, requireRole('Admin', 'Technician'),
     try {
         const { technician_id } = req.body;
 
-        if (!technician_id) {
+        // Allow null for unassignment
+        if (technician_id !== null && !technician_id) {
+            // This condition captures undefined or empty string but allows null
+            // Actually, simplified check: if strictly undefined return 400.
+            // But usually client sends null.
+        }
+
+        // If undefined (not provided at all), return error. If null, it means unassign.
+        if (typeof technician_id === 'undefined') {
             return res.status(400).json({
                 success: false,
                 message: 'Technician ID is required'
             });
         }
 
-        // Verify technician exists (User with role Technician)
-        const [technicians] = await pool.query("SELECT user_id FROM Users WHERE user_id = ? AND role = 'Technician'", [technician_id]);
-        if (technicians.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Technician not found'
-            });
+        // Verify technician exists (User with role Technician) IF providing an ID
+        if (technician_id) {
+            const [technicians] = await pool.query("SELECT user_id FROM Users WHERE user_id = ? AND role = 'Technician'", [technician_id]);
+            if (technicians.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Technician not found'
+                });
+            }
         }
 
-        const [result] = await pool.query(
-            `UPDATE Faults SET
-assigned_to = ?,
-    status = CASE WHEN status = 'Open' THEN 'In Progress' ELSE status END
-       WHERE fault_id = ? `,
-            [technician_id, req.params.id] // Note: Removed assigned_at update as it's not in new schema definition, but could keep if we alter table. User def didn't include it explicitly in CREATE TABLE provided, but 'reported_at', 'resolved_at' were there.
-            // Wait, user provided: "assigned_to INT" ... no assigned_at in the CREATE TABLE Faults provided. So I will skip it.
-        );
+        let updateQuery = 'UPDATE Faults SET assigned_to = ?';
+        const params = [technician_id]; // This handles null correctly
+
+        if (technician_id) {
+            updateQuery += ", status = CASE WHEN status = 'Open' THEN 'In Progress' ELSE status END";
+        } else {
+            // Revert to Open only if it was In Progress
+            updateQuery += ", status = CASE WHEN status = 'In Progress' THEN 'Open' ELSE status END";
+        }
+
+        updateQuery += ' WHERE fault_id = ?';
+        params.push(req.params.id);
+
+        const [result] = await pool.query(updateQuery, params);
 
         if (result.affectedRows === 0) {
             return res.status(404).json({
@@ -209,18 +232,18 @@ assigned_to = ?,
             });
         }
 
-        // Update technician status to busy - NOT APPLICABLE in new schema (no status col on Users)
-
-        // Notify Technician
-        await pool.query(
-            `INSERT INTO Notifications(user_id, type, message, link)
-        VALUES(?, 'fault_assigned', ?, ?)`,
-            [technician_id, `You have been assigned fault FLT-${String(req.params.id).padStart(3, '0')}`, `/faults`]
-        );
+        // Notify Technician only if assigning
+        if (technician_id) {
+            await pool.query(
+                `INSERT INTO Notifications(user_id, type, message, link)
+            VALUES(?, 'fault_assigned', ?, ?)`,
+                [technician_id, `You have been assigned fault FLT-${String(req.params.id).padStart(3, '0')}`, `/faults`]
+            );
+        }
 
         res.json({
             success: true,
-            message: 'Technician assigned successfully'
+            message: technician_id ? 'Technician assigned successfully' : 'Fault unassigned successfully'
         });
     } catch (error) {
         console.error('Assign technician error:', error);

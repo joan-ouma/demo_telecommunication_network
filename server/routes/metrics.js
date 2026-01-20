@@ -59,10 +59,9 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
     // We will just count total Technicians. Availability feature is deprecated in new schema unless we infer it.
     const [techStats] = await pool.query(`
       SELECT 
-        COUNT(*) as total,
-        0 as available,
-        0 as busy
-      FROM Users WHERE role='Technician'
+        COUNT(CASE WHEN role = 'Technician' THEN 1 END) as total,
+        COUNT(CASE WHEN role = 'Staff' AND status = 'Active' THEN 1 END) as active_staff
+      FROM Users
     `);
 
     res.json({
@@ -73,7 +72,9 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
         faults: faultStats[0],
         today: todayFaults[0],
         avg_response_time: Math.round(avgResponse[0].avg_time || 0),
+        avg_response_time: Math.round(avgResponse[0].avg_time || 0),
         technicians: techStats[0],
+        staff_count: techStats[0].active_staff,
         last_updated: new Date().toISOString()
       }
     });
@@ -262,48 +263,69 @@ router.post('/snapshot', authenticateToken, async (req, res) => {
 // Get KPI summary
 router.get('/kpi', authenticateToken, async (req, res) => {
   try {
-    // Mean Time To Repair (MTTR) - last 30 days
+    const { time_range = 'monthly' } = req.query;
+
+    let days = 30;
+    if (time_range === 'daily') days = 1;
+    if (time_range === 'weekly') days = 7;
+
+    // Mean Time To Repair (MTTR)
     const [mttr] = await pool.query(`
       SELECT AVG(response_time_minutes) as mttr
       FROM Faults 
       WHERE response_time_minutes IS NOT NULL 
-        AND resolved_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-    `);
+        AND resolved_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+    `, [days]);
 
-    // Fault frequency (faults per day - last 30 days)
+    // Fault frequency (faults per day)
+    // For 'daily', it's just total faults today. For others, it's average per day.
     const [frequency] = await pool.query(`
-      SELECT COUNT(*) / 30 as daily_avg
+      SELECT COUNT(*) / ? as daily_avg
       FROM Faults 
-      WHERE reported_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-    `);
-
-    // First response time (time from report to assignment) - assigned_to is User
-    // Note: 'assigned_at' removed from schema, so we can't calculate 'First Response' accurately anymore unless we use timestamps from logs/history which are in another table.
-    // For now, I'll return 0 or NULL to avoid errors. OR remove the KPI. I'll return 0.
-
-    /* 
-    const [firstResponse] = await pool.query(`
-  SELECT AVG(TIMESTAMPDIFF(MINUTE, reported_at, assigned_at)) as avg_first_response
-  FROM Faults 
-  WHERE assigned_at IS NOT NULL 
-    AND assigned_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-`); 
-    */
+      WHERE reported_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+    `, [days, days]);
 
     // Resolution rate
     const [resolutionRate] = await pool.query(`
       SELECT 
         SUM(CASE WHEN status IN ('Resolved', 'Closed') THEN 1 ELSE 0 END) / COUNT(*) * 100 as rate
       FROM Faults 
-      WHERE reported_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-    `);
+      WHERE reported_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+    `, [days]);
 
-    // Component availability
-    const [availability] = await pool.query(`
+    // Component availability (This is a current snapshot, time range applies less here, 
+    // but users might expect "Average availability over X days" which requires snapshots. 
+    // For now, allow it to remain current status or calculate from snapshots if possible.
+    // Component availability (Dynamic Calculation)
+    const [compCountRes] = await pool.query('SELECT COUNT(*) as total FROM Network_Components');
+    const totalComponents = compCountRes[0].total || 1;
+
+    const [downtimeRes] = await pool.query(`
+      SELECT SUM(response_time_minutes) as total_downtime
+      FROM Faults 
+      WHERE resolved_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+    `, [days]);
+
+    const totalDowntime = Number(downtimeRes[0].total_downtime) || 0;
+    const totalPossibleMinutes = days * 24 * 60 * totalComponents;
+
+    const availabilityPercent = Math.max(0, ((totalPossibleMinutes - totalDowntime) / totalPossibleMinutes) * 100);
+
+    // Technician Performance Stats
+    const [techPerformance] = await pool.query(`
       SELECT 
-        SUM(CASE WHEN status = 'Active' THEN 1 ELSE 0 END) / COUNT(*) * 100 as rate
-      FROM Network_Components
-    `);
+        u.user_id,
+        CONCAT(u.first_name, ' ', u.last_name) as name,
+        COUNT(f.fault_id) as resolved_count,
+        AVG(f.response_time_minutes) as avg_resolution_time
+      FROM Users u
+      LEFT JOIN Faults f ON u.user_id = f.assigned_to
+      WHERE u.role = 'Technician'
+        AND f.status IN ('Resolved', 'Closed')
+        AND f.resolved_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+      GROUP BY u.user_id
+      ORDER BY resolved_count DESC
+    `, [days]);
 
     res.json({
       success: true,
@@ -312,7 +334,9 @@ router.get('/kpi', authenticateToken, async (req, res) => {
         fault_frequency_daily: parseFloat((Number(frequency[0].daily_avg) || 0).toFixed(2)),
         avg_first_response_minutes: 0,
         resolution_rate_percent: parseFloat((Number(resolutionRate[0].rate) || 0).toFixed(2)),
-        availability_percent: parseFloat((Number(availability[0].rate) || 0).toFixed(2))
+        availability_percent: parseFloat(availabilityPercent.toFixed(2)),
+        technician_performance: techPerformance,
+        time_range: time_range
       }
     });
   } catch (error) {

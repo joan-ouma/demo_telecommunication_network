@@ -2,8 +2,6 @@
 
 This guide contains all SQL statements used in the MnettyWise application. You can execute these step-by-step in MySQL Workbench to recreate the database schema and generate an EER diagram.
 
-> **Note:** This system is designed for internal use by **Administrators** and **Technicians** only, as per the project specification.
-
 ---
 
 ## 📋 Table of Contents
@@ -40,7 +38,7 @@ CREATE TABLE IF NOT EXISTS Users (
     password_hash VARCHAR(255) NOT NULL,
     first_name VARCHAR(100) NOT NULL,
     last_name VARCHAR(100) NOT NULL,
-    role ENUM('Admin', 'Technician') DEFAULT 'Technician',
+    role ENUM('Admin', 'Technician', 'Viewer') DEFAULT 'Technician',
     status ENUM('Active', 'Inactive') DEFAULT 'Active',
     phone_number VARCHAR(15),
     email VARCHAR(100) UNIQUE,
@@ -52,15 +50,9 @@ CREATE TABLE IF NOT EXISTS Users (
 - `user_id`: Primary key, auto-incremented
 - `username`: Must be unique across all users
 - `password_hash`: Stores bcrypt-hashed passwords
-- `role`: Controls access permissions (**Admin** or **Technician** only)
+- `role`: Controls access permissions (Admin, Technician, Viewer)
 - `status`: Supports soft delete (Active/Inactive)
 - `created_at`: Tracks when user joined (for tenure display)
-
-**Roles Explained:**
-| Role | Description | Permissions |
-|------|-------------|-------------|
-| **Admin** | System administrators | Full access: manage users, components, reports, all faults |
-| **Technician** | Field technicians | Log faults, view assigned tasks, update resolution, mobile access |
 
 ---
 
@@ -76,8 +68,6 @@ CREATE TABLE IF NOT EXISTS Network_Components (
     ip_address VARCHAR(45),
     mac_address VARCHAR(17),
     location VARCHAR(100) NOT NULL,
-    latitude DECIMAL(10, 8),
-    longitude DECIMAL(11, 8),
     status ENUM('Active', 'Inactive', 'Maintenance', 'Faulty') DEFAULT 'Active',
     config_details TEXT,
     install_date DATE,
@@ -209,109 +199,6 @@ CREATE TABLE IF NOT EXISTS Metrics_Snapshots (
 
 ---
 
-### 2.7 Fault Comments Table
-Stores comments/notes for communication between technicians and admins on specific faults.
-
-```sql
-CREATE TABLE IF NOT EXISTS Fault_Comments (
-    comment_id INT AUTO_INCREMENT PRIMARY KEY,
-    fault_id INT NOT NULL,
-    user_id INT NOT NULL,
-    comment TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (fault_id) REFERENCES Faults(fault_id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES Users(user_id) ON DELETE CASCADE
-);
-```
-
-**Key Points:**
-- `fault_id`: Links to the related fault (CASCADE - comments deleted when fault is deleted)
-- `user_id`: User who posted the comment (CASCADE - comments deleted when user is deleted)
-- `comment`: The actual message text
-- `created_at`: Timestamp of when comment was posted
-
-**Use Cases:**
-- Technician reports missing equipment at location
-- Admin provides additional instructions
-- Updates on parts ordered or delays
-- Any back-and-forth communication about a fault
-
----
-
-### 2.8 Maintenance Comments Table
-Stores notes and communication during maintenance activities.
-
-```sql
-CREATE TABLE IF NOT EXISTS Maintenance_Comments (
-    comment_id INT AUTO_INCREMENT PRIMARY KEY,
-    log_id INT NOT NULL,
-    user_id INT NOT NULL,
-    comment TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (log_id) REFERENCES Maintenance_Logs(log_id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES Users(user_id) ON DELETE CASCADE
-);
-```
-
-**Key Points:**
-- `log_id`: Links to the maintenance log (CASCADE - deleted with log)
-- `user_id`: User who posted the note (CASCADE - deleted with user)
-- `comment`: The note/message content
-
-**Use Cases:**
-- Technician notes supplies needed (e.g., "Need more lubricant")
-- Admin approves purchase requests
-- Recording issues discovered during maintenance
-- Communication about spare parts or delays
-
----
-
-### 2.9 Inventory Items Table
-Stores items in stock such as spare parts and tools.
-
-```sql
-CREATE TABLE IF NOT EXISTS Inventory_Items (
-    item_id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    category VARCHAR(50) NOT NULL,
-    quantity INT DEFAULT 0,
-    min_level INT DEFAULT 5,
-    unit_cost DECIMAL(10, 2) DEFAULT 0.00,
-    location VARCHAR(100),
-    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-```
-
-**Key Points:**
-- `quantity`: Current stock level
-- `min_level`: Threshold for low stock alerts
-- Used for inventory management module.
-
----
-
-### 2.10 Audit Logs Table
-Tracks critical user actions for security and accountability.
-
-```sql
-CREATE TABLE IF NOT EXISTS Audit_Logs (
-    log_id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT,
-    action VARCHAR(50) NOT NULL,
-    entity_type VARCHAR(50),
-    entity_id INT,
-    details TEXT,
-    ip_address VARCHAR(45),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES Users(user_id) ON DELETE SET NULL
-);
-```
-
-**Key Points:**
-- `action`: Type of action (e.g., LOGIN, DELETE_FAULT)
-- `details`: JSON string containing metadata about the action
-
----
-
 ## 3. Sample Data Insertion
 
 ### 3.1 Insert Users
@@ -319,6 +206,10 @@ CREATE TABLE IF NOT EXISTS Audit_Logs (
 > **Note:** Passwords below are bcrypt hashes. In production, generate these using bcrypt with salt rounds of 10.
 
 ```sql
+-- Password hashes (for reference, use bcrypt to generate these):
+-- 'admin' -> $2a$10$... (use bcrypt.hash('admin', 10))
+-- 'tech_001' -> $2a$10$...
+
 INSERT INTO Users (username, password_hash, first_name, last_name, role, phone_number, email, status, created_at) 
 VALUES 
 ('jouma', '$2a$10$qwerty123...', 'Joan', 'Ouma', 'Admin', '0712345678', 'joan.ouma@mnettywise.ac.ke', 'Active', '2024-01-15 08:00:00'),
@@ -327,15 +218,6 @@ VALUES
 ('rwanjare', '$2a$10$mnopqr012...', 'Robin', 'Wanjare', 'Technician', '0799887766', 'robin.wanjare@mnettywise.ac.ke', 'Active', '2025-10-18 09:00:00'),
 ('fkibet', '$2a$10$stuvwx345...', 'Felix', 'Kibet', 'Technician', '0711223344', 'felix.kibet@mnettywise.ac.ke', 'Active', '2026-01-04 08:00:00');
 ```
-
-**Login Credentials (for testing):**
-| Username | Password | Role |
-|----------|----------|------|
-| jouma | admin | Admin |
-| ywangui | tech_001 | Technician |
-| mawuor | techy_002 | Technician |
-| rwanjare | techies_003 | Technician |
-| fkibet | teky_004 | Technician |
 
 ---
 
@@ -428,10 +310,6 @@ Follow these steps to generate an Enhanced Entity-Relationship (EER) Diagram:
 ┌─────────────────────┐
 │       Users         │
 │   (user_id PK)      │
-│                     │
-│ Roles:              │
-│ - Admin             │
-│ - Technician        │
 └─────────┬───────────┘
           │
           │ ┌──────────────────────────────────────────┐
@@ -541,19 +419,6 @@ For clean execution in MySQL Workbench, run in this order:
 9. **Reverse Engineer EER Diagram** (Step 4)
 
 > ⚠️ **Important:** The order matters because of foreign key dependencies. Users and Network_Components must exist before Faults and Maintenance_Logs can reference them.
-
----
-
-## 🎯 System Roles (Per Project Specification)
-
-This system supports **two roles only**:
-
-| Role | Responsibilities |
-|------|------------------|
-| **Admin** | Manage infrastructure database, assign technicians to faults, generate incident reports, view quality metrics, manage technician accounts |
-| **Technician** | Log network faults, update fault resolution status, access via mobile devices, view assigned tasks, record maintenance activities |
-
-*No external users (Viewers) are required as this is an internal operational system.*
 
 ---
 

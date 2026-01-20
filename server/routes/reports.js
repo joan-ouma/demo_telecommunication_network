@@ -83,9 +83,9 @@ router.get('/:id', authenticateToken, async (req, res) => {
 });
 
 // Generate new incident report
-router.post('/generate', authenticateToken, requireRole('Admin', 'Technician'), async (req, res) => {
+router.post('/generate', authenticateToken, requireRole('Admin', 'Manager'), async (req, res) => {
     try {
-        const { title, start_time, end_time, summary } = req.body;
+        const { title, start_time, end_time, summary, reported_by } = req.body;
 
         if (!title || !start_time || !end_time) {
             return res.status(400).json({
@@ -94,32 +94,61 @@ router.post('/generate', authenticateToken, requireRole('Admin', 'Technician'), 
             });
         }
 
-        // Fetch faults within the time range
-        const [faults] = await pool.query(`
+        // Build query for faults
+        let faultQuery = `
       SELECT f.*, nc.name as component_name, nc.type as component_type,
-             CONCAT(t.first_name, ' ', t.last_name) as technician_name
+             CONCAT(t.first_name, ' ', t.last_name) as technician_name,
+             CONCAT(u.first_name, ' ', u.last_name) as reporter_name
       FROM Faults f
       LEFT JOIN Network_Components nc ON f.component_id = nc.component_id
       LEFT JOIN Users t ON f.assigned_to = t.user_id
+      LEFT JOIN Users u ON f.reported_by = u.user_id
       WHERE f.reported_at BETWEEN ? AND ?
-      ORDER BY FIELD(f.priority, 'Critical', 'High', 'Medium', 'Low'), f.reported_at
-    `, [start_time, end_time]);
+    `;
+
+        const faultParams = [start_time, end_time];
+
+        if (reported_by) {
+            faultQuery += ' AND f.reported_by = ?';
+            faultParams.push(reported_by);
+        }
+
+        faultQuery += ' ORDER BY FIELD(f.priority, "Critical", "High", "Medium", "Low"), f.reported_at';
+
+        // Fetch faults within the time range
+        const [faults] = await pool.query(faultQuery, faultParams);
 
         // Calculate statistics
-        const [avgResolution] = await pool.query(`
+        let avgQuery = `
       SELECT AVG(response_time_minutes) as avg_time
       FROM Faults 
       WHERE reported_at BETWEEN ? AND ?
         AND response_time_minutes IS NOT NULL
-    `, [start_time, end_time]);
+    `;
+        const avgParams = [start_time, end_time];
+
+        if (reported_by) {
+            avgQuery += ' AND reported_by = ?';
+            avgParams.push(reported_by);
+        }
+
+        const [avgResolution] = await pool.query(avgQuery, avgParams);
 
         // Get affected components count
-        const [affectedComponents] = await pool.query(`
+        let compQuery = `
       SELECT COUNT(DISTINCT component_id) as count
       FROM Faults 
       WHERE reported_at BETWEEN ? AND ?
         AND component_id IS NOT NULL
-    `, [start_time, end_time]);
+    `;
+        const compParams = [start_time, end_time];
+
+        if (reported_by) {
+            compQuery += ' AND reported_by = ?';
+            compParams.push(reported_by);
+        }
+
+        const [affectedComponents] = await pool.query(compQuery, compParams);
 
         // Determine impact level (User provided default, or calculate if needed)
         // const criticalCount = faults.filter(f => f.priority === 'Critical').length;
@@ -136,10 +165,12 @@ router.post('/generate', authenticateToken, requireRole('Admin', 'Technician'), 
             faults: faults.map(f => ({
                 id: f.fault_id,
                 title: f.title,
+                description: f.description, // Include user description sentences
                 priority: f.priority,
                 status: f.status,
                 component: f.component_name,
                 technician: f.technician_name,
+                reporter: f.reporter_name,
                 reported_at: f.reported_at,
                 resolved_at: f.resolved_at,
                 response_time: f.response_time_minutes
@@ -161,6 +192,9 @@ router.post('/generate', authenticateToken, requireRole('Admin', 'Technician'), 
                     acc[f.category] = (acc[f.category] || 0) + 1;
                     return acc;
                 }, {})
+            },
+            filter: {
+                reported_by: reported_by || 'All Users'
             }
         };
 
@@ -201,7 +235,7 @@ router.post('/generate', authenticateToken, requireRole('Admin', 'Technician'), 
             action: 'GENERATE_REPORT',
             entityType: 'Report',
             entityId: result.insertId,
-            details: { title, impact_level: impactLevel },
+            details: { title, impact_level: impactLevel, reported_by_filter: reported_by },
             req
         });
     } catch (error) {
@@ -274,7 +308,7 @@ router.get('/trends/summary', authenticateToken, async (req, res) => {
 });
 
 // Update incident report
-router.put('/:id', authenticateToken, requireRole('Admin', 'Technician'), async (req, res) => {
+router.put('/:id', authenticateToken, requireRole('Admin', 'Manager'), async (req, res) => {
     try {
         const { title, start_time, end_time, summary, impact_level, total_faults, affected_components, avg_resolution_time } = req.body;
 
@@ -333,7 +367,7 @@ router.put('/:id', authenticateToken, requireRole('Admin', 'Technician'), async 
 });
 
 // Delete report
-router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) => {
+router.delete('/:id', authenticateToken, requireRole('Admin', 'Manager'), async (req, res) => {
     try {
         const [result] = await pool.query(
             'DELETE FROM Incident_Reports WHERE report_id = ?',
@@ -426,6 +460,11 @@ router.get('/:id/pdf', authenticateToken, async (req, res) => {
         doc.text(`Time Period: ${new Date(report.start_time).toLocaleString()} - ${new Date(report.end_time).toLocaleString()}`);
         doc.moveDown(0.3);
 
+        if (details.filter && details.filter.reported_by && details.filter.reported_by !== 'All Users') {
+            doc.text(`Filtered By: User ID ${details.filter.reported_by}`);
+            doc.moveDown(0.3);
+        }
+
         const impactColors = { critical: '#DC3545', major: '#FFC107', minor: '#28A745' };
         doc.text(`Impact Level: `, { continued: true });
         doc.fillColor(impactColors[report.impact_level] || '#333').text(report.impact_level?.toUpperCase() || 'N/A');
@@ -456,11 +495,12 @@ router.get('/:id/pdf', authenticateToken, async (req, res) => {
             details.faults.forEach((fault, index) => {
                 doc.fontSize(10).fillColor('#606C38').text(`${index + 1}. ${fault.title || 'Untitled Fault'}`);
                 doc.fontSize(9).fillColor('#666');
-                doc.text(`   Component: ${fault.component_name || 'N/A'} | Priority: ${fault.priority || 'N/A'} | Status: ${fault.status || 'N/A'}`);
+                doc.text(`   Component: ${fault.component || fault.component_name || 'N/A'} | Priority: ${fault.priority || 'N/A'} | Status: ${fault.status || 'N/A'}`);
+                doc.text(`   Reported By: ${fault.reporter || 'N/A'} | Date: ${new Date(fault.reported_at).toLocaleDateString()}`);
                 if (fault.description) {
-                    doc.text(`   Description: ${fault.description.substring(0, 100)}${fault.description.length > 100 ? '...' : ''}`);
+                    doc.text(`   Description: "${fault.description}"`, { align: 'justify' });
                 }
-                doc.moveDown(0.3);
+                doc.moveDown(0.5);
             });
             doc.moveDown(1);
         }

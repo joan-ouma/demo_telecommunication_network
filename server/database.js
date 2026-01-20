@@ -11,7 +11,7 @@ const __dirname = dirname(__filename);
 dotenv.config({ path: join(__dirname, '..', '.env') });
 
 // Create connection pool
-const pool = mysql.createPool({
+export const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
@@ -24,12 +24,27 @@ const pool = mysql.createPool({
 
 // Initialize database schema
 export async function initializeDatabase() {
-  const connection = await pool.getConnection();
+  // Create a connection without database selected to ensure we can create it
+  const connection = await mysql.createConnection({
+    host: process.env.DB_HOST || 'localhost',
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || '',
+    port: process.env.DB_PORT || 3306
+  });
 
   try {
     // Create database if not exists
     await connection.query(`CREATE DATABASE IF NOT EXISTS ${process.env.DB_NAME || 'telecom_network_db'}`);
     await connection.query(`USE ${process.env.DB_NAME || 'telecom_network_db'}`);
+
+    // Departments table (New)
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS Departments (
+        department_id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL UNIQUE,
+        location VARCHAR(100)
+      )
+    `);
 
     // Users table
     await connection.query(`
@@ -39,13 +54,21 @@ export async function initializeDatabase() {
         password_hash VARCHAR(255) NOT NULL,
         first_name VARCHAR(100) NOT NULL,
         last_name VARCHAR(100) NOT NULL,
-        role ENUM('Admin', 'Technician') DEFAULT 'Technician',
+        role ENUM('Admin', 'Manager', 'Technician', 'Staff') DEFAULT 'Technician',
         status ENUM('Active', 'Inactive') DEFAULT 'Active',
+        department_id INT,
         phone_number VARCHAR(15),
         email VARCHAR(100) UNIQUE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (department_id) REFERENCES Departments(department_id) ON DELETE SET NULL
       )
     `);
+
+    // Update Users table if exists
+    try {
+      await connection.query("ALTER TABLE Users ADD COLUMN department_id INT");
+      await connection.query("ALTER TABLE Users ADD CONSTRAINT users_fk_dept FOREIGN KEY (department_id) REFERENCES Departments(department_id) ON DELETE SET NULL");
+    } catch (e) { /* Column likely exists */ }
 
     // Network Components table
     await connection.query(`
@@ -53,6 +76,7 @@ export async function initializeDatabase() {
         component_id INT AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(100) NOT NULL,
         type ENUM('Router', 'Switch', 'Cable', 'Server', 'Antenna', 'Firewall', 'Access Point') NOT NULL,
+        department_id INT,
         model_number VARCHAR(100),
         ip_address VARCHAR(45),
         mac_address VARCHAR(17),
@@ -61,9 +85,16 @@ export async function initializeDatabase() {
         config_details TEXT,
         install_date DATE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (department_id) REFERENCES Departments(department_id) ON DELETE SET NULL
       )
     `);
+
+    // Update Network_Components table if exists
+    try {
+      await connection.query("ALTER TABLE Network_Components ADD COLUMN department_id INT");
+      await connection.query("ALTER TABLE Network_Components ADD CONSTRAINT comp_fk_dept FOREIGN KEY (department_id) REFERENCES Departments(department_id) ON DELETE SET NULL");
+    } catch (e) { /* Column likely exists */ }
 
     // Inventory Items table (missing piece added)
     await connection.query(`
@@ -201,6 +232,20 @@ export async function initializeDatabase() {
       )
     `);
 
+    // Notifications table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS Notifications (
+        notification_id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        type ENUM('fault_assigned', 'status_change', 'low_stock', 'system') NOT NULL,
+        message TEXT NOT NULL,
+        link VARCHAR(255),
+        is_read BOOLEAN DEFAULT FALSE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES Users(user_id) ON DELETE CASCADE
+      )
+    `);
+
     console.log('✅ Database schema initialized successfully');
 
     // Seed sample data
@@ -211,18 +256,40 @@ export async function initializeDatabase() {
     console.error('❌ Database initialization error:', error);
     throw error;
   } finally {
-    connection.release();
+    await connection.end();
   }
 }
 
 // Seed sample data
 async function seedSampleData(connection) {
   try {
+    // Seed Departments
+    const [depts] = await connection.query('SELECT COUNT(*) as count FROM Departments');
+    if (depts[0].count === 0) {
+      console.log('🏢 Seeding Departments...');
+      const deptValues = [
+        ['Network Operations', 'HQ Floor 2'],
+        ['Data Center A', 'Building 1'],
+        ['Data Center B', 'Building 2'],
+        ['Field Operations', 'HQ Floor 1'],
+        ['Customer Support', 'HQ Floor 3'],
+        ['Warehouse', 'Logistics Center'],
+        ['HR', 'HQ Floor 4'],
+        ['Finance', 'HQ Floor 4'],
+        ['IT Support', 'HQ Floor 2']
+      ];
+      await connection.query('INSERT INTO Departments (name, location) VALUES ?', [deptValues]);
+    }
+
     const [users] = await connection.query('SELECT COUNT(*) as count FROM Users');
     if (users[0].count > 0) {
       console.log('📊 Sample data already exists, skipping seed');
       return;
     }
+
+    // Assign departments to sample users (fetched IDs or hardcoded if sequential)
+    // For simplicity in seed, we won't strictly bind IDs here unless we fetch them, 
+    // but the column is nullable so it's fine.
 
     // Seed Users (hashed passwords would typically be done here, but implementing raw for now as requested/implied or hashing them)
     // NOTE: In a real app we MUST hash. I will hash them to match the Auth flow.
@@ -245,6 +312,7 @@ async function seedSampleData(connection) {
 
     const userValues = [
       ['jouma', adminPass, 'Joan', 'Ouma', 'Admin', '0712345678', 'joan.ouma@mnettywise.ac.ke', 'Active', '2024-01-15 08:00:00'],
+      ['manager', adminPass, 'Alex', 'Mwangi', 'Manager', '0722001122', 'alex.mwangi@mnettywise.ac.ke', 'Active', '2024-02-01 08:00:00'],
       ['ywangui', techPass1, 'Yvonne', 'Wangui', 'Technician', '0722123456', 'yvonne.wangui@mnettywise.ac.ke', 'Active', '2024-06-20 09:30:00'],
       ['mawuor', techPass2, 'Milany', 'Awuor', 'Technician', '0733987654', 'milany.awuor@mnettywise.ac.ke', 'Active', '2024-11-05 08:45:00'],
       ['rwanjare', techPass3, 'Robin', 'Wanjare', 'Technician', '0799887766', 'robin.wanjare@mnettywise.ac.ke', 'Active', threeMonthsAgo],
@@ -261,34 +329,34 @@ async function seedSampleData(connection) {
       // Spreading components out by ~0.002 degrees (~200m) for better map visibility without over-zooming
 
       // Server Room (Center)
-      ['Core Router - Server Room', 'Router', 'Cisco ISR 4451', '192.168.1.1', 'Active', 'Main Building - Server Room', '{"vlan": 10}', '2024-01-10', -1.2921, 36.8219],
+      ['Core Router', 'Router', 'Cisco ISR 4451', '192.168.1.1', 'Active', 'Main Building - Server Room', '{"vlan": 10}', '2024-01-10', -1.2921, 36.8219],
 
       // Admin Block (North)
-      ['Switch - Admin Wing', 'Switch', 'Catalyst 9300', '192.168.2.10', 'Active', 'Admin Block', '{"ports": 48}', '2023-05-15', -1.2900, 36.8219],
+      ['Switch', 'Switch', 'Catalyst 9300', '192.168.2.10', 'Active', 'Admin Block', '{"ports": 48}', '2023-05-15', -1.2900, 36.8219],
 
       // Boardroom (North East)
-      ['AP - Boardroom', 'Access Point', 'Ubiquiti UniFi 6 Pro', '192.168.3.5', 'Maintenance', 'Boardroom', '{"ssid": "Staff_Secure"}', '2023-08-30', -1.2905, 36.8235],
+      ['Access Point', 'Access Point', 'Ubiquiti UniFi 6 Pro', '192.168.3.5', 'Maintenance', 'Boardroom', '{"ssid": "Staff_Secure"}', '2023-08-30', -1.2905, 36.8235],
 
       // Reception (East)
-      ['AP - Reception', 'Access Point', 'Ubiquiti UniFi 6 Lite', '192.168.3.10', 'Active', 'Main Lobby', '{"ssid": "Guest_WiFi"}', '2024-02-15', -1.2921, 36.8240],
+      ['Access Point', 'Access Point', 'Ubiquiti UniFi 6 Lite', '192.168.3.10', 'Active', 'Main Lobby', '{"ssid": "Guest_WiFi"}', '2024-02-15', -1.2921, 36.8240],
 
       // Main Gate (South East) - Faulty (Red)
-      ['Switch - Main Gate', 'Switch', 'Cisco 2960', '192.168.2.20', 'Faulty', 'Security Gate A', '{"ports": 8, "poe": true}', '2021-06-10', -1.2940, 36.8235],
+      ['Switch', 'Switch', 'Cisco 2960', '192.168.2.20', 'Faulty', 'Security Gate A', '{"ports": 8, "poe": true}', '2021-06-10', -1.2940, 36.8235],
 
       // Basement/Power (South)
-      ['UPS Monitor - Basement', 'Server', 'APC Smart-UPS', '10.0.0.20', 'Active', 'Power Plant', '{"battery": "100%"}', '2022-11-20', -1.2942, 36.8219],
+      ['UPS Monitor', 'Server', 'APC Smart-UPS', '10.0.0.20', 'Active', 'Power Plant', '{"battery": "100%"}', '2022-11-20', -1.2942, 36.8219],
 
       // East Wing/Annex (South West)
-      ['Switch - West Wing', 'Switch', 'Catalyst 9200', '192.168.2.15', 'Active', 'West Wing Offices', '{"ports": 24}', '2023-01-10', -1.2935, 36.8200],
+      ['Switch', 'Switch', 'Catalyst 9200', '192.168.2.15', 'Active', 'West Wing Offices', '{"ports": 24}', '2023-01-10', -1.2935, 36.8200],
 
       // Cafeteria (West)
-      ['AP - Cafeteria', 'Access Point', 'Ubiquiti UniFi 6 LR', '192.168.3.15', 'Active', 'Staff Cafeteria', '{"ssid": "Staff_Common"}', '2023-09-01', -1.2921, 36.8195],
+      ['Access Point', 'Access Point', 'Ubiquiti UniFi 6 LR', '192.168.3.15', 'Active', 'Staff Cafeteria', '{"ssid": "Staff_Common"}', '2023-09-01', -1.2921, 36.8195],
 
       // HR Dept (North West)
-      ['Switch - HR Dept', 'Switch', 'Cisco 3560', '192.168.2.30', 'Active', 'HR Loading Dock', '{"ports": 24}', '2022-03-10', -1.2905, 36.8200],
+      ['Switch', 'Switch', 'Cisco 3560', '192.168.2.30', 'Active', 'HR Loading Dock', '{"ports": 24}', '2022-03-10', -1.2905, 36.8200],
 
       // Parking Lot (Far North) - Maintenance (Purple)
-      ['Wireless Bridge - Parking', 'Antenna', 'Ubiquiti Nanostation', '192.168.4.5', 'Maintenance', 'Parking North', '{"link_quality": "98%"}', '2022-01-01', -1.2885, 36.8219]
+      ['Wireless Bridge', 'Antenna', 'Ubiquiti Nanostation', '192.168.4.5', 'Maintenance', 'Parking North', '{"link_quality": "98%"}', '2022-01-01', -1.2885, 36.8219]
     ];
 
     await connection.query(
@@ -303,15 +371,16 @@ async function seedSampleData(connection) {
     const twoDaysAgo = new Date(now); twoDaysAgo.setDate(now.getDate() - 2);
     const fiveDaysAgo = new Date(now); fiveDaysAgo.setDate(now.getDate() - 5);
     const oneWeekAgo = new Date(now); oneWeekAgo.setDate(now.getDate() - 7);
+    const twoWeeksAgoDate = new Date(now); twoWeeksAgoDate.setDate(now.getDate() - 14);
 
     // 1. Yvonne (2) reports Faulty Switch (2), assigned to Felix (5)
     // 2. Robin (4) reports Overheating Server (4), assigned to Milany (3)
     const faultValues = [
-      [2, 2, 5, 'Switch in Hall 7 issue', 'Switch in Hall 7 is not powering up. No lights on front panel.', 'High', 'Open', 'hardware', new Date(), null, null],
-      [4, 4, 3, 'Boardroom Server overheating', 'Boardroom Server is overheating. Fans spinning at 100%.', 'Medium', 'In Progress', 'hardware', twoDaysAgo, null, null],
+      [2, 2, 5, 'Switch in Hall 7 issue', 'Switch in Hall 7 is not powering up. No lights on front panel.', 'High', 'Open', 'hardware', twoWeeksAgoDate, null, null],
+      [4, 4, 3, 'Boardroom Server overheating', 'Boardroom Server is overheating. Fans spinning at 100%.', 'Medium', 'In Progress', 'hardware', oneWeekAgo, null, null],
       [5, 2, 2, 'Firewall Blocking Traffic', 'Users unable to stream video content', 'Low', 'Resolved', 'software', fiveDaysAgo, 120, new Date()],
-      [7, 3, 4, 'Floor 2 Switch Port Error', 'Port 12 flashing orange continuously', 'Medium', 'Open', 'connectivity', oneDayAgo, null, null],
-      [6, 5, 2, 'Reception WiFi Slow', 'Signal dropping intermittently', 'Low', 'Pending', 'connectivity', oneWeekAgo, null, null],
+      [7, 3, 4, 'Floor 2 Switch Port Error', 'Port 12 flashing orange continuously', 'Medium', 'Open', 'connectivity', twoDaysAgo, null, null],
+      [6, 5, 2, 'Reception WiFi Slow', 'Signal dropping intermittently', 'Low', 'Pending', 'connectivity', oneDayAgo, null, null],
       [8, 2, 3, 'NAS Storage Full', 'Storage warning at 95% capacity', 'High', 'Closed', 'software', new Date(), 45, new Date()]
     ];
 
