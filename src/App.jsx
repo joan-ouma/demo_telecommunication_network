@@ -1,5 +1,5 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend } from 'chart.js';
 import { Doughnut, Bar } from 'react-chartjs-2';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
@@ -138,6 +138,7 @@ function Login({ onLogin }) {
 // Sidebar Component
 function Sidebar({ user, onLogout, isOpen, onClose }) {
     const location = useLocation();
+    const navigate = useNavigate();
 
 
     // Notification State
@@ -159,7 +160,7 @@ function Sidebar({ user, onLogout, isOpen, onClose }) {
 
     useEffect(() => {
         fetchNotifications();
-        const interval = setInterval(fetchNotifications, 30000); // Poll every 30s
+        const interval = setInterval(fetchNotifications, 10000); // Poll every 10s
         return () => clearInterval(interval);
     }, []);
 
@@ -270,9 +271,9 @@ function Sidebar({ user, onLogout, isOpen, onClose }) {
                                                     await fetchAPI(`/notifications/${n.notification_id}/read`, { method: 'PUT' });
                                                     fetchNotifications();
                                                 }
+                                                setShowNotifications(false); // Close dropdown
                                                 if (n.link) {
-                                                    window.location.hash = '#' + n.link; // Basic hash nav or use Link if Router available
-                                                    // Since we use react-router in App, we should navigate correctly or rely on the fact we are SPA
+                                                    navigate(n.link);
                                                 }
                                             }}
                                         >
@@ -2521,6 +2522,9 @@ function Technicians() {
     const [showPasswordModal, setShowPasswordModal] = useState(null);
     const [editingTech, setEditingTech] = useState(null);
     const [confirmDelete, setConfirmDelete] = useState(null); // For custom confirmation modal
+    const [statusChangeUser, setStatusChangeUser] = useState(null); // For status change modal
+    const [statusChangeTarget, setStatusChangeTarget] = useState(''); // 'Active' or 'Inactive'
+    const [statusChangeReason, setStatusChangeReason] = useState('');
 
     useEffect(() => {
         loadTechnicians();
@@ -2555,12 +2559,22 @@ function Technicians() {
         }
     };
 
-    const handleStatusChange = async (id, status) => {
+    const handleStatusChange = (user, newStatus) => {
+        setStatusChangeUser(user);
+        setStatusChangeTarget(newStatus);
+        setStatusChangeReason('');
+    };
+
+    const handleConfirmStatusChange = async () => {
+        if (!statusChangeUser) return;
         try {
-            await fetchAPI(`/technicians/${id}/status`, {
+            await fetchAPI(`/technicians/${statusChangeUser.id}/status`, {
                 method: 'PUT',
-                body: JSON.stringify({ status }),
+                body: JSON.stringify({ status: statusChangeTarget, reason: statusChangeReason || 'No reason provided' })
             });
+            setStatusChangeUser(null);
+            setStatusChangeTarget('');
+            setStatusChangeReason('');
             loadTechnicians();
         } catch (error) {
             alert(error.message);
@@ -2582,19 +2596,6 @@ function Technicians() {
             }
             setShowModal(false);
             setEditingTech(null);
-            loadTechnicians();
-        } catch (error) {
-            alert(error.message);
-        }
-    };
-
-    const handleDeactivate = async (id) => {
-        if (!window.confirm('Are you sure you want to deactivate this technician? They will no longer appear in the active technicians list.')) return;
-        try {
-            await fetchAPI(`/technicians/${id}/status`, {
-                method: 'PUT',
-                body: JSON.stringify({ status: 'Inactive' })
-            });
             loadTechnicians();
         } catch (error) {
             alert(error.message);
@@ -2647,9 +2648,9 @@ function Technicians() {
                     {technicians.filter(t => t.role === 'Manager').length > 0 && (
                         <div style={{ marginBottom: '2rem' }}>
                             <h3 style={{ marginBottom: '1rem', color: 'var(--primary)' }}>👨‍💼 Management</h3>
-                            <div className="stats-grid">
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem' }}>
                                 {technicians.filter(t => t.role === 'Manager').map((tech) => (
-                                    <div key={tech.id} className="card" style={{ borderLeft: '4px solid var(--primary)' }}>
+                                    <div key={tech.id} className="card" style={{ borderLeft: '4px solid var(--primary)', width: '100%', maxWidth: '350px' }}>
                                         <div className="d-flex align-center gap-2 mb-2">
                                             <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'linear-gradient(135deg, #2D3748 0%, #1A202C 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem', color: 'white' }}>
                                                 {tech.name[0]}
@@ -2667,11 +2668,26 @@ function Technicians() {
                                         <div className="text-muted mb-2" style={{ fontSize: '0.875rem' }}>
                                             <div>📧 {tech.email}</div>
                                             {tech.phone && <div>📞 {tech.phone}</div>}
+                                            {tech.created_at && (
+                                                <div>📅 Joined: {(() => {
+                                                    const created = new Date(tech.created_at);
+                                                    const now = new Date();
+                                                    const diffMs = now - created;
+                                                    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                                                    if (diffDays > 365) return `${Math.floor(diffDays / 365)}y ${Math.floor((diffDays % 365) / 30)}m ago`;
+                                                    if (diffDays > 30) return `${Math.floor(diffDays / 30)}m ago`;
+                                                    return `${diffDays} days ago`;
+                                                })()}</div>
+                                            )}
                                         </div>
-                                        {/* Manager Actions (Self Edit Only) */}
-                                        {Number(tech.id) === Number(user_id) && (
+                                        {/* Manager Actions (Self Edit or Admin Control) */}
+                                        {(Number(tech.id) === Number(user_id) || role === 'Admin') && (
                                             <div className="d-flex gap-2 mt-auto">
                                                 <button className="btn btn-sm btn-secondary flex-1" onClick={() => { setEditingTech(tech); setShowModal(true); }}>Edit</button>
+                                                <button className="btn btn-sm btn-secondary flex-1" onClick={() => handleResetPassword(tech.id)}>Pass</button>
+                                                {role === 'Admin' && Number(tech.id) !== Number(user_id) && (
+                                                    <button className="btn btn-sm btn-danger flex-1" onClick={() => handleStatusChange(tech, 'Inactive')}>Inactivate</button>
+                                                )}
                                             </div>
                                         )}
                                     </div>
@@ -2720,7 +2736,7 @@ function Technicians() {
                                 <div className="d-flex gap-2 mt-auto">
                                     <button className="btn btn-sm btn-secondary flex-1" onClick={() => { setEditingTech(tech); setShowModal(true); }}>Edit</button>
                                     <button className="btn btn-sm btn-secondary flex-1" onClick={() => handleResetPassword(tech.id)}>Pass</button>
-                                    <button className="btn btn-sm btn-danger flex-1" onClick={() => handleStatusChange(tech.id, 'Inactive')}>Inactivate</button>
+                                    <button className="btn btn-sm btn-danger flex-1" onClick={() => handleStatusChange(tech, 'Inactive')}>Inactivate</button>
                                 </div>
                             </div>
                         ))}
@@ -2728,9 +2744,9 @@ function Technicians() {
 
                     {/* Active Staff */}
                     <h3 style={{ marginBottom: '1rem', marginTop: '2rem', color: 'var(--primary)' }}>🏢 Staff Members ({technicians.filter(t => t.status === 'Active' && t.role === 'Staff').length})</h3>
-                    <div className="stats-grid">
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem' }}>
                         {technicians.filter(t => t.status === 'Active' && t.role === 'Staff').map((staff) => (
-                            <div key={staff.id} className="card">
+                            <div key={staff.id} className="card" style={{ width: '100%', maxWidth: '350px' }}>
                                 <div className="d-flex align-center gap-2 mb-2">
                                     <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'linear-gradient(135deg, #4299E1 0%, #2B6CB0 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem', color: 'white' }}>
                                         {staff.name[0]}
@@ -2742,7 +2758,10 @@ function Technicians() {
                                                 <span className="badge badge-primary" style={{ fontSize: '0.7em', padding: '2px 6px', marginLeft: '6px' }}>You</span>
                                             }
                                         </div>
-                                        <div className="text-muted" style={{ fontSize: '0.875rem' }}>{staff.role}</div>
+                                        <div className="text-muted" style={{ fontSize: '0.875rem' }}>
+                                            <div>{staff.role}</div>
+                                            {staff.department_name && <div className="text-primary" style={{ fontSize: '0.8rem', marginTop: '2px' }}>📍 {staff.department_name}</div>}
+                                        </div>
                                     </div>
                                 </div>
                                 <div className="text-muted mb-2" style={{ fontSize: '0.875rem' }}>
@@ -2763,181 +2782,121 @@ function Technicians() {
                                 <div className="d-flex gap-2 mt-auto">
                                     <button className="btn btn-sm btn-secondary flex-1" onClick={() => { setEditingTech(staff); setShowModal(true); }}>Edit</button>
                                     <button className="btn btn-sm btn-secondary flex-1" onClick={() => handleResetPassword(staff.id)}>Pass</button>
-                                    <button className="btn btn-sm btn-danger flex-1" onClick={() => handleStatusChange(staff.id, 'Inactive')}>Inactivate</button>
+                                    <button className="btn btn-sm btn-danger flex-1" onClick={() => handleStatusChange(staff, 'Inactive')}>Inactivate</button>
                                 </div>
                             </div>
                         ))}
                     </div>
-                    <div className="text-muted mb-2" style={{ fontSize: '0.875rem' }}>
-                        <div>📧 {tech.email}</div>
-                        {tech.phone && <div>📞 {tech.phone}</div>}
-                        {tech.created_at && (
-                            <div>📅 Joined: {(() => {
-                                const created = new Date(tech.created_at);
-                                const now = new Date();
-                                const diffMs = now - created;
-                                const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-                                const diffMonths = Math.floor(diffDays / 30);
-                                const diffYears = Math.floor(diffDays / 365);
-                                if (diffYears >= 1) {
-                                    const remainingMonths = Math.floor((diffDays % 365) / 30);
-                                    return `${diffYears}y ${remainingMonths}m ago`;
-                                } else if (diffMonths >= 1) {
-                                    return `${diffMonths} month${diffMonths > 1 ? 's' : ''} ago`;
-                                } else if (diffDays >= 1) {
-                                    return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-                                } else {
-                                    return 'Today';
-                                }
-                            })()}</div>
-                        )}
-                    </div>
-                    <div className="d-flex align-center justify-between">
-                        <span style={{ fontSize: '0.875rem' }}>
-                            <strong>{tech.active_faults || 0}</strong> active faults
-                        </span>
-                    </div>
-                    {(role === 'Admin' || role === 'Manager') && (
-                        <div className="d-flex gap-2 mt-3" style={{ flexWrap: 'wrap' }}>
-                            <button className="btn btn-secondary btn-sm" onClick={() => { setEditingTech(tech); setShowModal(true); }}>Edit</button>
-                            <button className="btn btn-warning btn-sm" style={{ background: '#DDA15E', borderColor: '#DDA15E', color: 'white' }} onClick={() => setShowPasswordModal(tech)}>Pass</button>
-                            <button className="btn btn-danger btn-sm" style={{ backgroundColor: '#DC3545', color: 'white' }} onClick={() => handleDeactivate(tech.id)}>Inactivate</button>
-                        </div>
+
+                    {/* Inactive Team */}
+                    {technicians.filter(t => t.status === 'Inactive').length > 0 && (
+                        <>
+                            <h3 style={{ marginTop: '2rem', marginBottom: '1rem', color: '#888' }}>Inactive Team ({technicians.filter(t => t.status === 'Inactive').length})</h3>
+                            <div className="stats-grid">
+                                {technicians.filter(t => t.status === 'Inactive').map((tech) => (
+                                    <div key={tech.id} className="card" style={{ opacity: 0.5, filter: 'grayscale(50%)' }}>
+                                        <div className="d-flex align-center gap-2 mb-2">
+                                            <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#888', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem', color: 'white' }}>
+                                                {tech.name[0]}
+                                            </div>
+                                            <div className="flex-1">
+                                                <div style={{ fontWeight: 600 }}>{tech.name}</div>
+                                                <div className="text-muted" style={{ fontSize: '0.875rem' }}>{tech.role} <span style={{ color: '#DC3545' }}>(Inactive)</span></div>
+                                            </div>
+                                        </div>
+                                        <div className="text-muted mb-2" style={{ fontSize: '0.875rem' }}>
+                                            <div>📧 {tech.email}</div>
+                                            {tech.phone && <div>📞 {tech.phone}</div>}
+                                        </div>
+                                        <div className="d-flex gap-2 mt-3" style={{ flexWrap: 'wrap' }}>
+                                            <button className="btn btn-primary btn-sm" onClick={() => handleStatusChange(tech, 'Active')}>Reactivate</button>
+                                            <button className="btn btn-danger btn-sm" style={{ backgroundColor: '#DC3545', color: 'white' }} onClick={() => setConfirmDelete(tech)}>Delete</button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </>
                     )}
+                </>
+            )}
+
+            {showModal && (
+                <TechnicianModal
+                    technician={editingTech}
+                    onClose={() => { setShowModal(false); setEditingTech(null); }}
+                    onSave={handleSave}
+                />
+            )}
+
+            {showPasswordModal && (
+                <PasswordResetModal
+                    technician={showPasswordModal}
+                    onClose={() => setShowPasswordModal(null)}
+                />
+            )}
+
+            {confirmDelete && (
+                <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
+                    <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400 }}>
+                        <div className="modal-header">
+                            <h3 className="modal-title" style={{ color: '#DC3545', display: 'flex', alignItems: 'center' }}>
+                                <AlertTriangle size={24} style={{ marginRight: '8px' }} /> Confirm Deletion
+                            </h3>
+                            <button className="modal-close" onClick={() => setConfirmDelete(null)}>&times;</button>
+                        </div>
+                        <div className="modal-body">
+                            <p style={{ marginBottom: '1rem' }}>
+                                Are you sure you want to <strong>permanently delete</strong> <strong>{confirmDelete.name}</strong>?
+                            </p>
+                            <p style={{ color: '#DC3545', fontSize: '0.875rem' }}>
+                                This action cannot be undone. All their data will be permanently removed.
+                            </p>
+                        </div>
+                        <div className="modal-footer">
+                            <button className="btn btn-secondary" onClick={() => setConfirmDelete(null)}>Cancel</button>
+                            <button className="btn btn-danger" style={{ backgroundColor: '#DC3545', color: 'white' }} onClick={() => handleDelete(confirmDelete.id)}>Delete Permanently</button>
+                        </div>
+                    </div>
                 </div>
-                        ))}
-            {technicians.filter(t => t.status === 'Active' && t.role !== 'Staff').length === 0 && (
-                <div className="text-muted">No active team members</div>
+            )}
+
+            {statusChangeUser && (
+                <div className="modal-overlay" onClick={() => setStatusChangeUser(null)}>
+                    <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400 }}>
+                        <div className="modal-header">
+                            <h3 className="modal-title">
+                                {statusChangeTarget === 'Active' ? 'Reactivate User' : 'Deactivate User'}
+                            </h3>
+                            <button className="modal-close" onClick={() => setStatusChangeUser(null)}>&times;</button>
+                        </div>
+                        <div className="modal-body">
+                            <p style={{ marginBottom: '1rem' }}>
+                                Please provide a reason for {statusChangeTarget === 'Active' ? 'reactivating' : 'deactivating'} <strong>{statusChangeUser.name}</strong>.
+                            </p>
+                            <div className="form-group">
+                                <label className="form-label">Reason</label>
+                                <textarea
+                                    className="form-input"
+                                    rows="3"
+                                    value={statusChangeReason}
+                                    onChange={(e) => setStatusChangeReason(e.target.value)}
+                                    placeholder={statusChangeTarget === 'Active' ? "e.g., Returned from leave" : "e.g., Resigned, On leave"}
+                                ></textarea>
+                            </div>
+                        </div>
+                        <div className="modal-footer">
+                            <button className="btn btn-secondary" onClick={() => setStatusChangeUser(null)}>Cancel</button>
+                            <button
+                                className={`btn ${statusChangeTarget === 'Active' ? 'btn-primary' : 'btn-danger'}`}
+                                onClick={handleConfirmStatusChange}
+                            >
+                                {statusChangeTarget === 'Active' ? 'Reactivate' : 'Deactivate'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
-
-                    {/* Staff Section */ }
-                    <h3 style={{ marginTop: '2rem', marginBottom: '1rem', color: '#4299E1' }}>🏢 Staff ({technicians.filter(t => t.status === 'Active' && t.role === 'Staff').length})</h3>
-                    <div className="stats-grid">
-                        {technicians.filter(t => t.status === 'Active' && t.role === 'Staff').map((tech) => (
-                            <div key={tech.id} className="card" style={{ borderLeft: '4px solid #4299E1' }}>
-                                <div className="d-flex align-center gap-2 mb-2">
-                                    <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'linear-gradient(135deg, #4299E1, #3182CE)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem', color: 'white' }}>
-                                        {tech.name[0]}
-                                    </div>
-                                    <div className="flex-1">
-                                        <div style={{ fontWeight: 600 }}>{tech.name}</div>
-                                        <div style={{ fontSize: '0.875rem', color: '#4299E1' }}>Staff</div>
-                                    </div>
-                                </div>
-                                <div className="text-muted mb-2" style={{ fontSize: '0.875rem' }}>
-                                    <div>📧 {tech.email}</div>
-                                    {tech.phone && <div>📞 {tech.phone}</div>}
-                                    {tech.created_at && (
-                                        <div>📅 Joined: {(() => {
-                                            const created = new Date(tech.created_at);
-                                            const now = new Date();
-                                            const diffMs = now - created;
-                                            const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-                                            if (diffDays >= 1) {
-                                                return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-                                            } else {
-                                                return 'Today';
-                                            }
-                                        })()}</div>
-                                    )}
-                                </div>
-                                {(role === 'Admin' || role === 'Manager') && (
-                                    <div className="d-flex gap-2 mt-3" style={{ flexWrap: 'wrap' }}>
-                                        <button className="btn btn-secondary btn-sm" onClick={() => { setEditingTech(tech); setShowModal(true); }}>Edit</button>
-                                        <button className="btn btn-warning btn-sm" style={{ background: '#DDA15E', borderColor: '#DDA15E', color: 'white' }} onClick={() => setShowPasswordModal(tech)}>Pass</button>
-                                        <button className="btn btn-danger btn-sm" style={{ backgroundColor: '#DC3545', color: 'white' }} onClick={() => handleDeactivate(tech.id)}>Inactivate</button>
-                                    </div>
-                                )}
-                            </div>
-                        ))}
-                        {technicians.filter(t => t.status === 'Active' && t.role === 'Staff').length === 0 && (
-                            <div className="text-muted">No staff members</div>
-                        )}
-                    </div>
-
-    {/* Inactive Technicians */ }
-    {
-        technicians.filter(t => t.status === 'Inactive').length > 0 && (
-            <>
-                <h3 style={{ marginTop: '2rem', marginBottom: '1rem', color: '#888' }}>Inactive Technicians ({technicians.filter(t => t.status === 'Inactive').length})</h3>
-                <div className="stats-grid">
-                    {technicians.filter(t => t.status === 'Inactive').map((tech) => (
-                        <div key={tech.id} className="card" style={{ opacity: 0.5, filter: 'grayscale(50%)' }}>
-                            <div className="d-flex align-center gap-2 mb-2">
-                                <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#888', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem', color: 'white' }}>
-                                    {tech.name[0]}
-                                </div>
-                                <div className="flex-1">
-                                    <div style={{ fontWeight: 600 }}>{tech.name}</div>
-                                    <div className="text-muted" style={{ fontSize: '0.875rem' }}>{tech.role} <span style={{ color: '#DC3545' }}>(Inactive)</span></div>
-                                </div>
-                            </div>
-                            <div className="text-muted mb-2" style={{ fontSize: '0.875rem' }}>
-                                <div>📧 {tech.email}</div>
-                                {tech.phone && <div>📞 {tech.phone}</div>}
-                            </div>
-                            <div className="d-flex gap-2 mt-3" style={{ flexWrap: 'wrap' }}>
-                                <button className="btn btn-primary btn-sm" onClick={() => handleStatusChange(tech.id, 'Active')}>Reactivate</button>
-                                <button className="btn btn-danger btn-sm" style={{ backgroundColor: '#DC3545', color: 'white' }} onClick={() => setConfirmDelete(tech)}>Delete</button>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            </>
-        )
-    }
-                </>
-            )
-}
-
-{
-    showModal && (
-        <TechnicianModal
-            technician={editingTech}
-            onClose={() => { setShowModal(false); setEditingTech(null); }}
-            onSave={handleSave}
-        />
-    )
-}
-
-{
-    showPasswordModal && (
-        <PasswordResetModal
-            technician={showPasswordModal}
-            onClose={() => setShowPasswordModal(null)}
-        />
-    )
-}
-
-{/* Custom Confirmation Modal */ }
-{
-    confirmDelete && (
-        <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
-            <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400 }}>
-                <div className="modal-header">
-                    <h3 className="modal-title" style={{ color: '#DC3545', display: 'flex', alignItems: 'center' }}>
-                        <AlertTriangle size={24} style={{ marginRight: '8px' }} /> Confirm Deletion
-                    </h3>
-                    <button className="modal-close" onClick={() => setConfirmDelete(null)}>&times;</button>
-                </div>
-                <div className="modal-body">
-                    <p style={{ marginBottom: '1rem' }}>
-                        Are you sure you want to <strong>permanently delete</strong> <strong>{confirmDelete.name}</strong>?
-                    </p>
-                    <p style={{ color: '#DC3545', fontSize: '0.875rem' }}>
-                        This action cannot be undone. All their data will be permanently removed.
-                    </p>
-                </div>
-                <div className="modal-footer">
-                    <button className="btn btn-secondary" onClick={() => setConfirmDelete(null)}>Cancel</button>
-                    <button className="btn btn-danger" style={{ backgroundColor: '#DC3545', color: 'white' }} onClick={() => handleDelete(confirmDelete.id)}>Delete Permanently</button>
-                </div>
-            </div>
-        </div>
-    )
-}
-        </div >
     );
 }
 
@@ -3665,11 +3624,60 @@ function AuditLogs() {
 
             if (parsed.title) return `Title: ${parsed.title}`;
             if (parsed.status) return `Status: ${parsed.status}`;
+            if (parsed.reason) return `Reason: ${parsed.reason}`;
+            if (parsed.target_user) return `User: ${parsed.target_user} (${parsed.target_role || ''})`;
 
-            return JSON.stringify(parsed).substring(0, 50) + (JSON.stringify(parsed).length > 50 ? '...' : '');
+            return JSON.stringify(parsed).substring(0, 70) + (JSON.stringify(parsed).length > 70 ? '...' : '');
         } catch (e) {
             return String(details);
         }
+    };
+
+    // Visual indicator for action type
+    const getActionStyle = (action) => {
+        const lowerAction = action.toLowerCase();
+        if (lowerAction.includes('delete') || lowerAction.includes('remove')) {
+            return { background: '#FEB2B2', borderLeft: '4px solid #E53E3E', color: '#742A2A' }; // Red
+        }
+        if (lowerAction.includes('deactivate') || lowerAction.includes('inactive')) {
+            return { background: '#FEEBC8', borderLeft: '4px solid #ED8936', color: '#7B341E' }; // Orange
+        }
+        if (lowerAction.includes('reactivate') || lowerAction.includes('active')) {
+            return { background: '#C6F6D5', borderLeft: '4px solid #48BB78', color: '#22543D' }; // Green
+        }
+        if (lowerAction.includes('password') || lowerAction.includes('reset')) {
+            return { background: '#E9D8FD', borderLeft: '4px solid #805AD5', color: '#322659' }; // Purple
+        }
+        return {}; // Default style
+    };
+
+    const getActionBadgeStyle = (action) => {
+        const lowerAction = action.toLowerCase();
+        if (lowerAction.includes('delete') || lowerAction.includes('remove')) {
+            return { background: '#E53E3E', color: 'white' };
+        }
+        if (lowerAction.includes('deactivate') || lowerAction.includes('inactive')) {
+            return { background: '#ED8936', color: 'white' };
+        }
+        if (lowerAction.includes('reactivate')) {
+            return { background: '#48BB78', color: 'white' };
+        }
+        if (lowerAction.includes('password') || lowerAction.includes('reset')) {
+            return { background: '#805AD5', color: 'white' };
+        }
+        if (lowerAction.includes('create')) {
+            return { background: '#3182CE', color: 'white' };
+        }
+        if (lowerAction.includes('update') || lowerAction.includes('edit')) {
+            return { background: '#319795', color: 'white' };
+        }
+        if (lowerAction.includes('login')) {
+            return { background: '#38A169', color: 'white' };
+        }
+        if (lowerAction.includes('logout')) {
+            return { background: '#718096', color: 'white' };
+        }
+        return { background: '#A0AEC0', color: 'white' };
     };
 
     const handlePrint = () => { window.print(); };
@@ -3680,11 +3688,11 @@ function AuditLogs() {
             ...logs.map(log => [
                 log.created_at,
                 log.user_name,
-                log.user_email, // Using email as proxy for role/identity detail or we can fetch role if available
+                log.user_email,
                 log.action,
                 log.entity_type,
                 log.entity_id,
-                `"${String(log.details).replace(/"/g, '""')}"`, // Escape quotes
+                `"${String(log.details).replace(/"/g, '""')}"`,
                 log.ip_address
             ])
         ].map(e => e.join(',')).join('\n');
@@ -3703,7 +3711,7 @@ function AuditLogs() {
         <div>
             <div className="page-header">
                 <h1 className="page-title">Audit Trail</h1>
-                <p className="page-subtitle">Track system activity</p>
+                <p className="page-subtitle">Track all system activity</p>
             </div>
 
             <div className="action-bar">
@@ -3714,6 +3722,18 @@ function AuditLogs() {
                         <option value="Report">Reports</option>
                         <option value="User">Users</option>
                         <option value="Component">Components</option>
+                        <option value="Inventory">Inventory</option>
+                        <option value="Maintenance">Maintenance</option>
+                    </select>
+                    <select className="filter-select" value={filter.action} onChange={(e) => setFilter({ ...filter, action: e.target.value })}>
+                        <option value="">All Actions</option>
+                        <option value="LOGIN">Login</option>
+                        <option value="LOGOUT">Logout</option>
+                        <option value="CREATE">Creates</option>
+                        <option value="UPDATE">Updates</option>
+                        <option value="DELETE">Deletes</option>
+                        <option value="DEACTIVATE">Deactivations</option>
+                        <option value="PASSWORD">Password Resets</option>
                     </select>
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -3721,6 +3741,15 @@ function AuditLogs() {
                     <button className="btn btn-secondary" onClick={handleExport}>Export CSV</button>
                     <button className="btn btn-secondary" onClick={loadLogs}>Refresh</button>
                 </div>
+            </div>
+
+            {/* Legend */}
+            <div className="card mb-3" style={{ padding: '0.75rem 1rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', fontSize: '0.85rem' }}>
+                <span><span style={{ display: 'inline-block', width: 16, height: 16, background: '#E53E3E', borderRadius: 3, marginRight: 6, verticalAlign: 'middle' }}></span>Deletion</span>
+                <span><span style={{ display: 'inline-block', width: 16, height: 16, background: '#ED8936', borderRadius: 3, marginRight: 6, verticalAlign: 'middle' }}></span>Deactivation</span>
+                <span><span style={{ display: 'inline-block', width: 16, height: 16, background: '#48BB78', borderRadius: 3, marginRight: 6, verticalAlign: 'middle' }}></span>Reactivation</span>
+                <span><span style={{ display: 'inline-block', width: 16, height: 16, background: '#805AD5', borderRadius: 3, marginRight: 6, verticalAlign: 'middle' }}></span>Password Reset</span>
+                <span><span style={{ display: 'inline-block', width: 16, height: 16, background: '#3182CE', borderRadius: 3, marginRight: 6, verticalAlign: 'middle' }}></span>Creation</span>
             </div>
 
             <div className="card">
@@ -3741,15 +3770,15 @@ function AuditLogs() {
                                 <tr><td colSpan="6" className="text-center">Loading...</td></tr>
                             ) : logs.length > 0 ? (
                                 logs.map(log => (
-                                    <tr key={log.log_id}>
+                                    <tr key={log.log_id} style={getActionStyle(log.action)}>
                                         <td>{new Date(log.created_at).toLocaleString()}</td>
                                         <td>
                                             <div style={{ fontWeight: 500 }}>{log.user_name}</div>
                                             <div className="text-muted" style={{ fontSize: '0.75rem' }}>{log.user_email}</div>
                                         </td>
-                                        <td><span className="badge badge-secondary">{log.action}</span></td>
-                                        <td>{log.entity_type} #{log.entity_id}</td>
-                                        <td title={typeof log.details === 'string' ? log.details : JSON.stringify(log.details)}>{formatDetails(log.details)}</td>
+                                        <td><span className="badge" style={getActionBadgeStyle(log.action)}>{log.action}</span></td>
+                                        <td>{log.entity_type} {log.entity_id ? `#${log.entity_id}` : ''}</td>
+                                        <td style={{ maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis' }} title={typeof log.details === 'string' ? log.details : JSON.stringify(log.details)}>{formatDetails(log.details)}</td>
                                         <td className="text-muted">{log.ip_address}</td>
                                     </tr>
                                 ))
@@ -3772,6 +3801,7 @@ function Inventory() {
     const [loading, setLoading] = useState(true);
     const [showModal, setShowModal] = useState(false);
     const [showUseModal, setShowUseModal] = useState(false);
+    const [issueItem, setIssueItem] = useState(null);
     const [editItem, setEditItem] = useState(null);
     const [filter, setFilter] = useState('');
 
@@ -3845,6 +3875,26 @@ function Inventory() {
     const categories = ['Routers', 'Switches', 'Cables', 'Fiber Optics', 'Antennas', 'Network Cards', 'Tools'];
 
     const filteredItems = filter ? items.filter(i => i.category === filter) : items;
+
+    const handleIssue = async (data) => {
+        try {
+            await fetchAPI('/inventory/issue', {
+                method: 'POST',
+                body: JSON.stringify({
+                    item_id: data.itemId,
+                    technician_id: data.technicianId,
+                    quantity: parseInt(data.quantity),
+                    notes: data.notes
+                }),
+            });
+            setIssueItem(null);
+            loadInventory();
+            loadStats();
+            alert('Item issued successfully');
+        } catch (error) {
+            alert(error.message);
+        }
+    };
 
     const handlePrint = () => { window.print(); };
 
@@ -3957,7 +4007,10 @@ function Inventory() {
                                                 <button className="btn btn-primary btn-sm" onClick={() => { setEditItem(item); setShowUseModal(true); }}>Use</button>
                                             )}
                                             {user?.role !== 'Technician' && (
-                                                <button className="btn btn-secondary btn-sm" onClick={() => { setEditItem(item); setShowModal(true); }}>Edit</button>
+                                                <>
+                                                    <button className="btn btn-secondary btn-sm" style={{ color: 'var(--primary)', borderColor: 'var(--primary)' }} onClick={() => setIssueItem(item)}>Issue</button>
+                                                    <button className="btn btn-secondary btn-sm" onClick={() => { setEditItem(item); setShowModal(true); }}>Edit</button>
+                                                </>
                                             )}
                                             {user?.role === 'Admin' && (
                                                 <button className="btn btn-danger btn-sm" onClick={() => handleDelete(item.item_id)}>Delete</button>
@@ -3988,6 +4041,13 @@ function Inventory() {
                     item={editItem}
                     onClose={() => { setShowUseModal(false); setEditItem(null); }}
                     onUse={handleUseItem}
+                />
+            )}
+            {issueItem && (
+                <IssueItemModal
+                    item={issueItem}
+                    onClose={() => setIssueItem(null)}
+                    onSave={handleIssue}
                 />
             )}
         </div>
@@ -4378,6 +4438,89 @@ function UseInventoryModal({ item, onClose, onUse }) {
                     <div className="modal-footer">
                         <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
                         <button type="submit" className="btn btn-primary">Confirm Usage</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+}
+
+// Issue Item Modal
+function IssueItemModal({ item, onClose, onSave }) {
+    const [quantity, setQuantity] = useState(1);
+    const [technicianId, setTechnicianId] = useState('');
+    const [notes, setNotes] = useState('');
+    const [users, setUsers] = useState([]);
+
+    useEffect(() => {
+        const loadUsers = async () => {
+            try {
+                const response = await fetchAPI('/users');
+                setUsers(response.data.filter(u => u.role === 'Technician' || u.role === 'Staff'));
+            } catch (e) {
+                console.error("Failed to load users", e);
+            }
+        };
+        loadUsers();
+    }, []);
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        onSave({ itemId: item.item_id, technicianId, quantity, notes });
+    };
+
+    return (
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400 }}>
+                <div className="modal-header">
+                    <h3 className="modal-title">Issue Item: {item.name}</h3>
+                    <button className="modal-close" onClick={onClose}>&times;</button>
+                </div>
+                <form onSubmit={handleSubmit}>
+                    <div className="modal-body">
+                        <div className="card mb-3" style={{ background: 'var(--bg-tertiary)', fontSize: '0.9rem' }}>
+                            <div className="d-flex justify-content-between mb-1">
+                                <span>Current Stock:</span>
+                                <strong>{item.quantity}</strong>
+                            </div>
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label">Issue To *</label>
+                            <select className="form-select" value={technicianId} onChange={(e) => setTechnicianId(e.target.value)} required>
+                                <option value="">Select Staff/Technician...</option>
+                                {users.map(u => (
+                                    <option key={u.user_id} value={u.user_id}>{u.first_name} {u.last_name} ({u.role})</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label">Quantity *</label>
+                            <input
+                                type="number"
+                                className="form-input"
+                                min="1"
+                                max={item.quantity}
+                                value={quantity}
+                                onChange={(e) => setQuantity(e.target.value)}
+                                required
+                            />
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label">Notes</label>
+                            <textarea
+                                className="form-input"
+                                rows="2"
+                                value={notes}
+                                onChange={(e) => setNotes(e.target.value)}
+                            ></textarea>
+                        </div>
+                    </div>
+                    <div className="modal-footer">
+                        <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+                        <button type="submit" className="btn btn-primary" disabled={!technicianId || quantity > item.quantity}>Issue Item</button>
                     </div>
                 </form>
             </div>

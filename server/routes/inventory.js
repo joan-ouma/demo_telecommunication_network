@@ -261,4 +261,63 @@ router.post('/:id/use', authenticateToken, async (req, res) => {
     }
 });
 
+// Issue inventory item to technician
+router.post('/issue', authenticateToken, requireRole('Admin', 'Manager'), async (req, res) => {
+    try {
+        const { item_id, technician_id, quantity, notes } = req.body;
+
+        if (!item_id || !technician_id || !quantity || quantity <= 0) {
+            return res.status(400).json({ success: false, message: 'Valid Item, Technician, and Quantity required' });
+        }
+
+        const [itemRes] = await pool.query('SELECT * FROM Inventory_Items WHERE item_id = ?', [item_id]);
+        if (itemRes.length === 0) {
+            return res.status(404).json({ success: false, message: 'Item not found' });
+        }
+        const item = itemRes[0];
+
+        if (item.quantity < quantity) {
+            return res.status(400).json({ success: false, message: 'Insufficient stock' });
+        }
+
+        const newQuantity = item.quantity - quantity;
+
+        // Update quantity
+        await pool.query('UPDATE Inventory_Items SET quantity = ? WHERE item_id = ?', [newQuantity, item_id]);
+
+        // Create Issuance Log
+        await pool.query(
+            'INSERT INTO Inventory_Issuance_Logs (item_id, technician_id, issued_by, quantity, notes) VALUES (?, ?, ?, ?, ?)',
+            [item_id, technician_id, req.user.id, quantity, notes]
+        );
+
+        // Check for low stock and notify
+        if (newQuantity <= item.min_level) {
+            const [admins] = await pool.query("SELECT user_id FROM Users WHERE role IN ('Admin', 'Manager') AND status = 'Active'");
+            for (const admin of admins) {
+                await pool.query(
+                    `INSERT INTO Notifications(user_id, type, message, link)
+                     VALUES(?, 'low_stock', ?, ?)`,
+                    [admin.user_id, `Low Stock Alert: ${item.name} issued to technician. Remaining: ${newQuantity}`, `/inventory`]
+                );
+            }
+        }
+
+        await logAction({
+            userId: req.user.id,
+            action: 'ISSUE_INVENTORY_ITEM',
+            entityType: 'Inventory',
+            entityId: item_id,
+            details: { technician_id, quantity, new_balance: newQuantity, notes },
+            req
+        });
+
+        res.json({ success: true, message: 'Item issued successfully', new_quantity: newQuantity });
+
+    } catch (error) {
+        console.error('Issue inventory item error:', error);
+        res.status(500).json({ success: false, message: 'Failed to issue item' });
+    }
+});
+
 export default router;

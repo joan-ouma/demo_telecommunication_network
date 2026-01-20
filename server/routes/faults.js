@@ -314,6 +314,46 @@ status = ?,
             );
         }
 
+        // Notify Admins and Managers
+        if (['Resolved', 'Closed', 'Open'].includes(status)) {
+            let msg = '';
+            if (status === 'Resolved') {
+                msg = `Fault FLT-${String(req.params.id).padStart(3, '0')} is marked as Resolved.`;
+            } else if (status === 'Closed') {
+                msg = `Fault FLT-${String(req.params.id).padStart(3, '0')} is Confirmed and Closed.`;
+            } else if (status === 'Open' && fault.status === 'Resolved') {
+                msg = `Fault FLT-${String(req.params.id).padStart(3, '0')} resolution was Rejected and Reopened.`;
+            }
+
+            if (msg) {
+                const [adminsAndManagers] = await pool.query("SELECT user_id FROM Users WHERE role IN ('Admin', 'Manager')");
+                for (const recipient of adminsAndManagers) {
+                    if (recipient.user_id !== req.user.id) {
+                        await pool.query(
+                            `INSERT INTO Notifications(user_id, type, message, link) VALUES(?, 'status_change', ?, ?)`,
+                            [recipient.user_id, msg, '/faults']
+                        );
+                    }
+                }
+            }
+        }
+
+        // Notify Assigned Technician when reporter confirms or rejects their fix
+        if (fault.assigned_to && fault.assigned_to !== req.user.id) {
+            let techMsg = '';
+            if (status === 'Closed' && fault.status === 'Resolved') {
+                techMsg = `✅ Your fix for FLT-${String(req.params.id).padStart(3, '0')} was confirmed by the reporter.`;
+            } else if (status === 'Open' && fault.status === 'Resolved') {
+                techMsg = `❌ FLT-${String(req.params.id).padStart(3, '0')} was reopened - reporter says issue persists. Please recheck.`;
+            }
+            if (techMsg) {
+                await pool.query(
+                    `INSERT INTO Notifications(user_id, type, message, link) VALUES(?, 'status_change', ?, ?)`,
+                    [fault.assigned_to, techMsg, '/faults']
+                );
+            }
+        }
+
         // Log status update
         await logAction({
             userId: req.user.id,

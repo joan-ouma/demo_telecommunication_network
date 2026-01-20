@@ -17,9 +17,11 @@ router.get('/', authenticateToken, async (req, res) => {
         // However, the original app used them. I will return basic user info for now.
 
         let query = `
-      SELECT user_id as id, CONCAT(first_name, ' ', last_name) as name, email, phone_number as phone, role, created_at, status,
+      SELECT u.user_id as id, CONCAT(u.first_name, ' ', u.last_name) as name, u.email, u.phone_number as phone, u.role, u.created_at, u.status, u.department_id,
+             d.name as department_name,
              (SELECT COUNT(*) FROM Faults f WHERE f.assigned_to = u.user_id AND f.status IN ('Open', 'In Progress')) as active_faults
       FROM Users u
+      LEFT JOIN Departments d ON u.department_id = d.department_id
       WHERE u.role IN ('Technician', 'Staff', 'Manager')
     `;
         const params = [];
@@ -104,12 +106,37 @@ router.get('/:id', authenticateToken, async (req, res) => {
     }
 });
 
-// Create new technician
+// Create new technician or staff
 router.post('/', authenticateToken, requireRole('Admin', 'Manager'), async (req, res) => {
     try {
-        // This endpoint creates a User with role='Technician' or 'Staff'
-        const { username, email, first_name, last_name, phone_number, password, role } = req.body;
-        const userRole = role === 'Staff' ? 'Staff' : 'Technician';
+        const { username, email, first_name, last_name, phone_number, password, role, department_id } = req.body;
+        let userRole = role || 'Technician';
+
+        // Validate role - only allow Technician, Staff, or Manager
+        if (!['Technician', 'Staff', 'Manager'].includes(userRole)) {
+            userRole = 'Technician';
+        }
+
+        // Only Admin can create Manager
+        if (userRole === 'Manager' && req.user.role !== 'Admin') {
+            return res.status(403).json({
+                success: false,
+                message: 'Only Admin can create a Manager'
+            });
+        }
+
+        // Enforce only one Manager constraint
+        if (userRole === 'Manager') {
+            const [existingManagers] = await pool.query(
+                "SELECT COUNT(*) as count FROM Users WHERE role = 'Manager' AND status = 'Active'"
+            );
+            if (existingManagers[0].count >= 1) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Only one active Manager is allowed in the system'
+                });
+            }
+        }
 
         if (!username || !email || !first_name || !last_name || !password) {
             return res.status(400).json({
@@ -122,8 +149,8 @@ router.post('/', authenticateToken, requireRole('Admin', 'Manager'), async (req,
         const hashedPassword = await bcrypt.default.hash(password, 10);
 
         const [result] = await pool.query(
-            'INSERT INTO Users (username, email, password_hash, first_name, last_name, phone_number, role) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [username, email, hashedPassword, first_name, last_name, phone_number, userRole]
+            'INSERT INTO Users (username, email, password_hash, first_name, last_name, phone_number, role, department_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [username, email, hashedPassword, first_name, last_name, phone_number, userRole, department_id || null]
         );
 
         res.status(201).json({
@@ -132,20 +159,20 @@ router.post('/', authenticateToken, requireRole('Admin', 'Manager'), async (req,
             data: { id: result.insertId, name: `${first_name} ${last_name}`, email, role: userRole }
         });
 
-        // Log technician creation
+        // Log creation
         await logAction({
             userId: req.user.id,
-            action: 'CREATE_TECHNICIAN',
+            action: `CREATE_${userRole.toUpperCase()}`,
             entityType: 'User',
             entityId: result.insertId,
-            details: { username, email, full_name: `${first_name} ${last_name}` },
+            details: { username, email, full_name: `${first_name} ${last_name}`, role: userRole },
             req
         });
     } catch (error) {
-        console.error('Create technician error:', error);
+        console.error('Create user error:', error);
         res.status(500).json({
             success: false,
-            message: 'Failed to create technician'
+            message: 'Failed to create user'
         });
     }
 });
@@ -249,10 +276,7 @@ router.delete('/:id', authenticateToken, requireRole('Admin'), async (req, res) 
     }
 });
 
-// Update technician status
-// REMOVED: The new schema does not have a status column for Users/Technicians.
-// We'll keep the route to prevent 404s but make it a no-op or return 400.
-// Reset technician password
+// Reset user password
 router.put('/:id/password', authenticateToken, requireRole('Admin', 'Manager'), async (req, res) => {
     try {
         const { password } = req.body;
@@ -267,21 +291,41 @@ router.put('/:id/password', authenticateToken, requireRole('Admin', 'Manager'), 
         const bcrypt = await import('bcryptjs');
         const hashedPassword = await bcrypt.default.hash(password, 10);
 
-        const [result] = await pool.query(
-            "UPDATE Users SET password_hash = ? WHERE user_id = ? AND role = 'Technician'",
-            [hashedPassword, req.params.id]
+        // Get user info for audit logging
+        const [userInfo] = await pool.query(
+            "SELECT user_id, username, first_name, last_name, role FROM Users WHERE user_id = ?",
+            [req.params.id]
         );
 
-        if (result.affectedRows === 0) {
+        if (userInfo.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: 'Technician not found'
+                message: 'User not found'
             });
         }
+
+        const [result] = await pool.query(
+            "UPDATE Users SET password_hash = ? WHERE user_id = ?",
+            [hashedPassword, req.params.id]
+        );
 
         res.json({
             success: true,
             message: 'Password updated successfully'
+        });
+
+        // Log password reset
+        await logAction({
+            userId: req.user.id,
+            action: 'PASSWORD_RESET',
+            entityType: 'User',
+            entityId: req.params.id,
+            details: {
+                target_user: userInfo[0].username,
+                target_role: userInfo[0].role,
+                reset_by: req.user.username
+            },
+            req
         });
     } catch (error) {
         console.error('Reset password error:', error);
@@ -292,9 +336,10 @@ router.put('/:id/password', authenticateToken, requireRole('Admin', 'Manager'), 
     }
 });
 
+// Update user status (deactivate/reactivate)
 router.put('/:id/status', authenticateToken, requireRole('Admin', 'Manager'), async (req, res) => {
     try {
-        const { status } = req.body;
+        const { status, reason } = req.body;
 
         if (!status || !['Active', 'Inactive'].includes(status)) {
             return res.status(400).json({
@@ -303,24 +348,47 @@ router.put('/:id/status', authenticateToken, requireRole('Admin', 'Manager'), as
             });
         }
 
-        const [result] = await pool.query(
-            "UPDATE Users SET status = ? WHERE user_id = ? AND role = 'Technician'",
-            [status, req.params.id]
+        // Get user info for audit logging
+        const [userInfo] = await pool.query(
+            "SELECT user_id, username, first_name, last_name, role, status as prev_status FROM Users WHERE user_id = ?",
+            [req.params.id]
         );
 
-        if (result.affectedRows === 0) {
+        if (userInfo.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: 'Technician not found'
+                message: 'User not found'
             });
         }
 
+        // Update status and reason
+        const [result] = await pool.query(
+            "UPDATE Users SET status = ?, status_reason = ? WHERE user_id = ?",
+            [status, status === 'Inactive' ? (reason || null) : null, req.params.id]
+        );
+
         res.json({
             success: true,
-            message: `Technician status updated to ${status}`
+            message: `User status updated to ${status}`
+        });
+
+        // Log status change
+        await logAction({
+            userId: req.user.id,
+            action: status === 'Inactive' ? 'DEACTIVATE_USER' : 'REACTIVATE_USER',
+            entityType: 'User',
+            entityId: req.params.id,
+            details: {
+                target_user: userInfo[0].username,
+                target_role: userInfo[0].role,
+                previous_status: userInfo[0].prev_status,
+                new_status: status,
+                reason: reason || 'No reason provided'
+            },
+            req
         });
     } catch (error) {
-        console.error('Update technician status error:', error);
+        console.error('Update user status error:', error);
         res.status(500).json({
             success: false,
             message: 'Failed to update status'
