@@ -2794,7 +2794,7 @@ function Technicians() {
                             <h3 style={{ marginTop: '2rem', marginBottom: '1rem', color: '#888' }}>Inactive Team ({technicians.filter(t => t.status === 'Inactive').length})</h3>
                             <div className="stats-grid">
                                 {technicians.filter(t => t.status === 'Inactive').map((tech) => (
-                                    <div key={tech.id} className="card" style={{ opacity: 0.5, filter: 'grayscale(50%)' }}>
+                                    <div key={tech.id} className="card" style={{ opacity: 0.5, filter: 'grayscale(50%)', maxWidth: '350px' }}>
                                         <div className="d-flex align-center gap-2 mb-2">
                                             <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#888', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem', color: 'white' }}>
                                                 {tech.name[0]}
@@ -4456,7 +4456,7 @@ function IssueItemModal({ item, onClose, onSave }) {
         const loadUsers = async () => {
             try {
                 const response = await fetchAPI('/users');
-                setUsers(response.data.filter(u => u.role === 'Technician' || u.role === 'Staff'));
+                setUsers(response.data.filter(u => u.role === 'Technician'));
             } catch (e) {
                 console.error("Failed to load users", e);
             }
@@ -4488,7 +4488,7 @@ function IssueItemModal({ item, onClose, onSave }) {
                         <div className="form-group">
                             <label className="form-label">Issue To *</label>
                             <select className="form-select" value={technicianId} onChange={(e) => setTechnicianId(e.target.value)} required>
-                                <option value="">Select Staff/Technician...</option>
+                                <option value="">Select Technician...</option>
                                 {users.map(u => (
                                     <option key={u.user_id} value={u.user_id}>{u.first_name} {u.last_name} ({u.role})</option>
                                 ))}

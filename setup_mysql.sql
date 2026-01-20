@@ -39,6 +39,7 @@ CREATE TABLE `Users` (
   `last_name` varchar(100) NOT NULL,
   `role` enum('Admin','Manager','Technician','Staff') DEFAULT 'Technician',
   `status` enum('Active','Inactive') DEFAULT 'Active',
+  `status_reason` varchar(255) DEFAULT NULL,
   `department_id` int(11) DEFAULT NULL,
   `phone_number` varchar(15) DEFAULT NULL,
   `email` varchar(100) DEFAULT NULL,

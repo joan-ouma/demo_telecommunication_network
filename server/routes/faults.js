@@ -237,7 +237,7 @@ router.put('/:id/assign', authenticateToken, requireRole('Admin', 'Technician'),
             await pool.query(
                 `INSERT INTO Notifications(user_id, type, message, link)
             VALUES(?, 'fault_assigned', ?, ?)`,
-                [technician_id, `You have been assigned fault FLT-${String(req.params.id).padStart(3, '0')}`, `/faults`]
+                [technician_id, `You have been assigned fault FLT-${String(req.params.id).padStart(3, '0')}`, `/faults?highlight=${req.params.id}`]
             );
         }
 
@@ -310,7 +310,7 @@ status = ?,
             await pool.query(
                 `INSERT INTO Notifications(user_id, type, message, link)
         VALUES(?, 'status_change', ?, ?)`,
-                [fault.reported_by, `Fault FLT-${String(req.params.id).padStart(3, '0')} is now ${status}`, `/faults`]
+                [fault.reported_by, `Fault FLT-${String(req.params.id).padStart(3, '0')} is now ${status}`, `/faults?highlight=${req.params.id}`]
             );
         }
 
@@ -331,7 +331,7 @@ status = ?,
                     if (recipient.user_id !== req.user.id) {
                         await pool.query(
                             `INSERT INTO Notifications(user_id, type, message, link) VALUES(?, 'status_change', ?, ?)`,
-                            [recipient.user_id, msg, '/faults']
+                            [recipient.user_id, msg, `/faults?highlight=${req.params.id}`]
                         );
                     }
                 }
@@ -349,7 +349,7 @@ status = ?,
             if (techMsg) {
                 await pool.query(
                     `INSERT INTO Notifications(user_id, type, message, link) VALUES(?, 'status_change', ?, ?)`,
-                    [fault.assigned_to, techMsg, '/faults']
+                    [fault.assigned_to, techMsg, `/faults?highlight=${req.params.id}`]
                 );
             }
         }
