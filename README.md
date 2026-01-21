@@ -70,14 +70,7 @@ npm run dev
 *   **Frontend Check:** Open [http://localhost:5173](http://localhost:5173) in your browser.
 *   **Backend Check:** Takes requests on [http://localhost:3000](http://localhost:3000).
 
-## 🧪 Sample Login Credentials
 
-To test the system, use these pre-configured accounts:
-
-| Role | Username | Password |
-| :--- | :--- | :--- |
-| **Admin** | `jouma` | `admin` |
-| **Technician** | `ywangui` | `tech_001` |
 
 ## 📂 Project Structure
 ```
