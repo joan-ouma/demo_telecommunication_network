@@ -2,6 +2,10 @@
     "version": 2,
     "builds": [
         {
+            "src": "index.js",
+            "use": "@vercel/node"
+        },
+        {
             "src": "package.json",
             "use": "@vercel/static-build",
             "config": {
@@ -15,16 +19,12 @@
             "dest": "/index.js"
         },
         {
-            "src": "/assets/(.*)",
-            "dest": "/dist/assets/$1"
-        },
-        {
-            "src": "/(.*\\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|map|json))",
-            "dest": "/dist/$1"
+            "handle": "filesystem"
         },
         {
             "src": "/(.*)",
-            "dest": "/dist/index.html"
+            "dest": "/index.js"
         }
-    ]
+    ],
+    "outputDirectory": "dist"
 }
