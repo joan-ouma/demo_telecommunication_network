@@ -910,6 +910,13 @@ function StaffFaultReport() {
         loadMyReports();
     }, []);
 
+    // Auto-refresh components when switching back to the form tab
+    useEffect(() => {
+        if (showForm) {
+            loadComponents();
+        }
+    }, [showForm]);
+
     useEffect(() => {
         if (form.department_id) {
             const selectedDept = departments.find(d => String(d.department_id) === String(form.department_id));
@@ -1093,7 +1100,18 @@ function StaffFaultReport() {
                                 </select>
                             </div>
                             <div className="form-group">
-                                <label className="form-label" style={{ fontWeight: 600 }}>Affected Equipment *</label>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <label className="form-label" style={{ fontWeight: 600 }}>Affected Equipment *</label>
+                                    <button
+                                        type="button"
+                                        onClick={loadComponents}
+                                        className="btn btn-sm btn-secondary"
+                                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                                        title="Refresh equipment list"
+                                    >
+                                        🔄 Refresh
+                                    </button>
+                                </div>
                                 <select
                                     className="form-input"
                                     value={form.component_id}
@@ -1675,12 +1693,32 @@ function FaultModal({ onClose, onSave }) {
         category: 'Connectivity', // Default capitalized
         priority: 'Medium',
         component_id: '',
+        department_id: '',
     });
     const [components, setComponents] = useState([]);
+    const [departments, setDepartments] = useState([]);
+    const [filteredComponents, setFilteredComponents] = useState([]);
 
     useEffect(() => {
-        fetchAPI('/components').then((res) => setComponents(res.data));
+        fetchAPI('/components').then((res) => {
+            setComponents(res.data);
+            setFilteredComponents(res.data);
+        });
+        fetchAPI('/departments').then((res) => setDepartments(res.data));
     }, []);
+
+    // Filter components when department changes
+    useEffect(() => {
+        if (form.department_id) {
+            const selectedDept = departments.find(d => String(d.department_id) === String(form.department_id));
+            setFilteredComponents(components.filter(c =>
+                String(c.department_id) === String(form.department_id) ||
+                (selectedDept && c.location === selectedDept.name)
+            ));
+        } else {
+            setFilteredComponents(components);
+        }
+    }, [form.department_id, components, departments]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -1713,11 +1751,24 @@ function FaultModal({ onClose, onSave }) {
                             <textarea className="form-textarea" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
                         </div>
                         <div className="form-group">
+                            <label className="form-label">Department</label>
+                            <select
+                                className="form-select"
+                                value={form.department_id}
+                                onChange={(e) => setForm({ ...form, department_id: e.target.value, component_id: '' })}
+                            >
+                                <option value="">All Departments</option>
+                                {departments.map((dept) => (
+                                    <option key={dept.department_id} value={dept.department_id}>{dept.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div className="form-group">
                             <label className="form-label">Affected Component</label>
                             <select className="form-select" value={form.component_id} onChange={(e) => setForm({ ...form, component_id: e.target.value })}>
                                 <option value="">Select component...</option>
-                                {components.map((comp) => (
-                                    <option key={comp.component_id} value={comp.component_id}>{comp.name} ({comp.type})</option>
+                                {filteredComponents.map((comp) => (
+                                    <option key={comp.component_id} value={comp.component_id}>{comp.name}</option>
                                 ))}
                             </select>
                         </div>
