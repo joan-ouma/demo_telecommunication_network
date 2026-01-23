@@ -33,8 +33,19 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static files in production
-app.use(express.static(path.join(__dirname, 'dist')));
+// Serve static files in production with proper headers
+app.use(express.static(path.join(__dirname, 'dist'), {
+    setHeaders: (res, filepath) => {
+        // Set correct MIME types for JavaScript modules
+        if (filepath.endsWith('.js')) {
+            res.setHeader('Content-Type', 'application/javascript');
+        } else if (filepath.endsWith('.mjs')) {
+            res.setHeader('Content-Type', 'application/javascript');
+        } else if (filepath.endsWith('.css')) {
+            res.setHeader('Content-Type', 'text/css');
+        }
+    }
+}));
 
 // API Routes
 app.use('/api/auth', authRoutes);
@@ -57,8 +68,12 @@ app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Serve React app for all other routes
-app.get('*', (req, res) => {
+// Serve React app for all other routes (but NOT for static assets)
+app.get('*', (req, res, next) => {
+    // Don't serve index.html for file requests (js, css, images, etc.)
+    if (req.path.match(/\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|map|json)$/)) {
+        return next(); // Let it 404 if file doesn't exist
+    }
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
