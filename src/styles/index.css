@@ -106,6 +106,7 @@ body {
   flex-direction: column;
   position: fixed;
   height: 100vh;
+  overflow-y: auto;
   z-index: 100;
   transition: transform var(--transition-normal);
 }

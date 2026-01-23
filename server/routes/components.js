@@ -122,7 +122,10 @@ router.post('/', authenticateToken, requireRole('Admin', 'Technician'), async (r
        (name, type, model_number, ip_address, mac_address, location, status, config_details, install_date, latitude, longitude, department_id) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [name, type, model_number, ip_address, mac_address, location, status,
-                config_details, install_date, latitude, longitude, department_id || null]
+                config_details, install_date,
+                latitude === '' || latitude === undefined ? null : latitude,
+                longitude === '' || longitude === undefined ? null : longitude,
+                department_id || null]
         );
 
         res.status(201).json({
