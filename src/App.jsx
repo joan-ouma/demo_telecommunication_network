@@ -670,7 +670,7 @@ function Infrastructure() {
                                 <th>Type</th>
                                 <th>Model No.</th>
                                 <th>IP Address</th>
-                                <th>Location</th>
+                                <th>Department</th>
                                 <th>Latitude</th>
                                 <th>Longitude</th>
                                 <th>Status</th>
@@ -684,7 +684,7 @@ function Infrastructure() {
                                     <td><span className="badge badge-info">{comp.type}</span></td>
                                     <td>{comp.model_number || '-'}</td>
                                     <td><code style={{ fontSize: '0.8rem' }}>{comp.ip_address || '-'}</code></td>
-                                    <td>{comp.location || '-'}</td>
+                                    <td>{comp.department_name || '-'}</td>
                                     <td>{comp.latitude || '-'}</td>
                                     <td>{comp.longitude || '-'}</td>
                                     <td><span className={`badge status-${comp.status.toLowerCase()}`}>{comp.status}</span></td>
@@ -912,11 +912,15 @@ function StaffFaultReport() {
 
     useEffect(() => {
         if (form.department_id) {
-            setFilteredComponents(components.filter(c => String(c.department_id) === String(form.department_id)));
+            const selectedDept = departments.find(d => String(d.department_id) === String(form.department_id));
+            setFilteredComponents(components.filter(c =>
+                String(c.department_id) === String(form.department_id) ||
+                (selectedDept && c.location === selectedDept.name)
+            ));
         } else {
             setFilteredComponents(components);
         }
-    }, [form.department_id, components]);
+    }, [form.department_id, components, departments]);
 
     const loadDepartments = async () => {
         try {
@@ -1100,7 +1104,7 @@ function StaffFaultReport() {
                                     <option value="">-- Select equipment --</option>
                                     {filteredComponents.map(c => (
                                         <option key={c.component_id} value={c.component_id}>
-                                            {c.name} ({c.type}) {c.department_name ? `- ${c.department_name}` : ''}
+                                            {c.name}
                                         </option>
                                     ))}
                                 </select>
@@ -1136,31 +1140,6 @@ function StaffFaultReport() {
                                     placeholder="e.g., Building A, 3rd Floor, Office 305"
                                     value={form.location_description}
                                     onChange={(e) => setForm({ ...form, location_description: e.target.value })}
-                                    style={{ padding: '0.875rem' }}
-                                />
-                            </div>
-                        </div>
-
-                        <div className="grid-2" style={{ marginBottom: '1.5rem' }}>
-                            <div className="form-group">
-                                <label className="form-label" style={{ fontWeight: 600 }}>Latitude (Optional)</label>
-                                <input
-                                    type="number" step="any"
-                                    className="form-input"
-                                    placeholder="e.g. -1.2921"
-                                    value={form.latitude || ''}
-                                    onChange={(e) => setForm({ ...form, latitude: e.target.value })}
-                                    style={{ padding: '0.875rem' }}
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label className="form-label" style={{ fontWeight: 600 }}>Longitude (Optional)</label>
-                                <input
-                                    type="number" step="any"
-                                    className="form-input"
-                                    placeholder="e.g. 36.8219"
-                                    value={form.longitude || ''}
-                                    onChange={(e) => setForm({ ...form, longitude: e.target.value })}
                                     style={{ padding: '0.875rem' }}
                                 />
                             </div>
@@ -2621,6 +2600,10 @@ function Technicians() {
         document.body.removeChild(a);
     };
 
+    const handleResetPassword = (userId) => {
+        setShowPasswordModal(userId);
+    };
+
     return (
         <div>
             <div className="page-header">
@@ -2900,8 +2883,25 @@ function Technicians() {
     );
 }
 
-function PasswordResetModal({ technician, onClose }) {
+function PasswordResetModal({ technician: technicianId, onClose }) {
     const [password, setPassword] = useState('');
+    const [technician, setTechnician] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const loadTechnician = async () => {
+            try {
+                const response = await fetchAPI('/technicians');
+                const tech = response.data.find(t => t.id === technicianId);
+                setTechnician(tech);
+            } catch (error) {
+                console.error('Failed to load technician:', error);
+            } finally {
+                setLoading(false);
+            }
+        };
+        loadTechnician();
+    }, [technicianId]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -2918,6 +2918,32 @@ function PasswordResetModal({ technician, onClose }) {
             alert(error.message);
         }
     };
+
+    if (loading) {
+        return (
+            <div className="modal-overlay" onClick={onClose}>
+                <div className="modal" onClick={(e) => e.stopPropagation()}>
+                    <div className="spinner"></div>
+                </div>
+            </div>
+        );
+    }
+
+    if (!technician) {
+        return (
+            <div className="modal-overlay" onClick={onClose}>
+                <div className="modal" onClick={(e) => e.stopPropagation()}>
+                    <div className="modal-header">
+                        <h3 className="modal-title">Error</h3>
+                        <button className="modal-close" onClick={onClose}>&times;</button>
+                    </div>
+                    <div className="modal-body">
+                        <p>Technician not found.</p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="modal-overlay" onClick={onClose}>
