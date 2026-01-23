@@ -72,7 +72,6 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
         faults: faultStats[0],
         today: todayFaults[0],
         avg_response_time: Math.round(avgResponse[0].avg_time || 0),
-        avg_response_time: Math.round(avgResponse[0].avg_time || 0),
         technicians: techStats[0],
         staff_count: techStats[0].active_staff,
         last_updated: new Date().toISOString()

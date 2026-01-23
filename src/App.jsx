@@ -602,7 +602,7 @@ function Infrastructure() {
         }
     };
 
-    const isAdmin = role === 'Admin';
+    const canEdit = role === 'Admin' || role === 'Manager';
 
     const handlePrint = () => { window.print(); };
 
@@ -627,7 +627,7 @@ function Infrastructure() {
             <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                     <h1 className="page-title">Infrastructure</h1>
-                    <p className="page-subtitle">{isAdmin ? 'Manage network components and configurations' : 'View network components and locations'}</p>
+                    <p className="page-subtitle">{canEdit ? 'Manage network components and configurations' : 'View network components and locations'}</p>
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <button className="btn btn-secondary" onClick={handlePrint}><Printer size={16} /> Print</button>
@@ -654,9 +654,11 @@ function Infrastructure() {
                         <option value="Faulty">Faulty</option>
                     </select>
                 </div>
-                <button className="btn btn-primary" onClick={() => { setEditingComponent(null); setShowModal(true); }}>
-                    + Add Component
-                </button>
+                {canEdit && (
+                    <button className="btn btn-primary" onClick={() => { setEditingComponent(null); setShowModal(true); }}>
+                        + Add Component
+                    </button>
+                )}
             </div>
 
             {loading ? (
@@ -689,10 +691,12 @@ function Infrastructure() {
                                     <td>{comp.longitude || '-'}</td>
                                     <td><span className={`badge status-${comp.status.toLowerCase()}`}>{comp.status}</span></td>
                                     <td>
-                                        {isAdmin ? (
+                                        {canEdit ? (
                                             <div className="d-flex gap-1">
                                                 <button className="btn btn-secondary btn-sm" onClick={() => { setEditingComponent(comp); setShowModal(true); }}>Edit</button>
-                                                <button className="btn btn-danger btn-sm" onClick={() => handleDelete(comp.component_id)}>Delete</button>
+                                                {role === 'Admin' && (
+                                                    <button className="btn btn-danger btn-sm" onClick={() => handleDelete(comp.component_id)}>Delete</button>
+                                                )}
                                             </div>
                                         ) : (
                                             <span className="text-muted" style={{ fontSize: '0.85rem', fontStyle: 'italic' }}>View only</span>
