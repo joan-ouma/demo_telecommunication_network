@@ -3160,8 +3160,12 @@ export default function App() {
             <BrowserRouter>
                 <div className="app-container">
                     <button className="mobile-menu-toggle" onClick={() => setSidebarOpen(!sidebarOpen)}>
-                        ☰
+                        <Menu size={24} />
                     </button>
+                    <div
+                        className={`sidebar-backdrop ${sidebarOpen ? 'active' : ''}`}
+                        onClick={() => setSidebarOpen(false)}
+                    />
                     <Sidebar user={user} onLogout={handleLogout} isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
                     <main className="main-content">
                         <Routes>

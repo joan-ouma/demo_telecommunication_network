@@ -107,8 +107,10 @@ body {
   position: fixed;
   height: 100vh;
   overflow-y: auto;
-  z-index: 100;
+  z-index: 1001;
   transition: transform var(--transition-normal);
+  left: 0;
+  top: 0;
 }
 
 .sidebar-header {
@@ -880,23 +882,60 @@ body {
   position: fixed;
   top: var(--space-md);
   left: var(--space-md);
-  z-index: 101;
+  z-index: 1002;
   background: var(--gradient-primary);
   border: none;
   border-radius: var(--radius-md);
-  padding: var(--space-sm);
+  padding: var(--space-md);
   cursor: pointer;
   color: white;
   font-size: 1.5rem;
+  width: 48px;
+  height: 48px;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-lg);
+  transition: all var(--transition-fast);
+}
+
+.mobile-menu-toggle:hover {
+  transform: scale(1.05);
+  box-shadow: var(--shadow-glow);
+}
+
+.mobile-menu-toggle:active {
+  transform: scale(0.95);
+}
+
+/* Sidebar Backdrop for Mobile */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  backdrop-filter: blur(2px);
 }
 
 @media (max-width: 1024px) {
   .sidebar {
     transform: translateX(-100%);
+    box-shadow: var(--shadow-lg);
   }
 
   .sidebar.open {
     transform: translateX(0);
+  }
+
+  .sidebar-backdrop {
+    display: none;
+  }
+
+  .sidebar-backdrop.active {
+    display: block;
   }
 
   .mobile-menu-toggle {
@@ -905,7 +944,7 @@ body {
 
   .main-content {
     margin-left: 0;
-    padding-top: 70px;
+    padding-top: 80px;
   }
 
   .grid-2,
@@ -955,7 +994,7 @@ body {
 @media (max-width: 480px) {
   .main-content {
     padding: var(--space-md);
-    padding-top: 70px;
+    padding-top: 80px;
   }
 
   .card {
@@ -964,6 +1003,21 @@ body {
 
   .modal {
     margin: var(--space-sm);
+  }
+
+  .sidebar {
+    width: 85%;
+    max-width: 320px;
+  }
+
+  .sidebar-header {
+    flex-wrap: wrap;
+  }
+
+  /* Smooth scrolling for touch devices */
+  .sidebar {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
 }
 
